@@ -249,8 +249,8 @@ void logEvent(uint8_t reason) {
 
 void flashEraseData() {
   header.sampleCount = 0;
-  header.recordingStartMs = 0;
-  header.recordingEndMs = 0;
+  header.recordingStartUnix = 0;
+  header.recordingEndUnix = 0;
   header.isRecording = 0;
   header.hasData = 0;
   lastErasedSector = 0xFFFFFFFF;
@@ -520,7 +520,7 @@ void setup() {
     logEvent(EVT_STOP_POWER);
     header.isRecording = 0;
     header.hasData = (header.sampleCount > 0) ? 1 : 0;
-    header.recordingEndMs = millis();
+    header.recordingEndUnix = wallClockMs();
     flashWriteHeader();
     Serial.print("Recovered recording: "); Serial.print(header.sampleCount); Serial.println(" samples");
   }
