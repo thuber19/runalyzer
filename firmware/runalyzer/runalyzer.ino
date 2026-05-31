@@ -123,8 +123,8 @@ uint64_t wallClockMs() {
 }
 static uint32_t lastErasedSector = 0xFFFFFFFF;
 
-#define WRITE_BUF_SAMPLES 256  // 256 × 16 = 4KB = 1 sector
-static uint8_t writeBuf[WRITE_BUF_SAMPLES * SAMPLE_SIZE];
+#define WRITE_BUF_SAMPLES (FLASH_SECTOR_SIZE / SAMPLE_SIZE)  // 341 × 12 = 4092 ≈ 1 sector
+static __attribute__((aligned(4))) uint8_t writeBuf[WRITE_BUF_SAMPLES * SAMPLE_SIZE];
 static uint32_t writeBufCount = 0;
 
 bool qspiInit() {

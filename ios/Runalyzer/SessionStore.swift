@@ -118,17 +118,26 @@ class SessionStore: ObservableObject {
             samplesFileName: fileName
         )
 
+        // Save samples file
         do {
             let data = try JSONEncoder().encode(samples)
-            try data.write(to: storageDir.appendingPathComponent(fileName))
-            print("Saved session: \(samples.count) samples, \(analysis.totalSteps) steps")
+            try data.write(to: storageDir.appendingPathComponent(fileName), options: .atomic)
         } catch {
-            print("FAILED to save session: \(error)")
+            print("FAILED to save samples: \(error)")
             return false
         }
 
+        // Save session index — both files must succeed
         sessions.insert(session, at: 0)
-        saveSessions()
+        if !saveSessions() {
+            // Rollback: remove the session we just added and delete the samples file
+            sessions.removeFirst()
+            try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(fileName))
+            print("FAILED to save session index — rolled back")
+            return false
+        }
+
+        print("Saved session: \(samples.count) samples, \(analysis.totalSteps) steps")
         return true
     }
 
@@ -187,9 +196,15 @@ class SessionStore: ObservableObject {
         }
     }
 
-    private func saveSessions() {
-        if let data = try? JSONEncoder().encode(sessions) {
-            try? data.write(to: sessionsURL)
+    @discardableResult
+    private func saveSessions() -> Bool {
+        do {
+            let data = try JSONEncoder().encode(sessions)
+            try data.write(to: sessionsURL, options: .atomic)
+            return true
+        } catch {
+            print("ERROR: failed to save sessions index: \(error)")
+            return false
         }
     }
 
