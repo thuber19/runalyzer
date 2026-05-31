@@ -12,6 +12,11 @@ struct ContentView: View {
                 .tabItem {
                     Label("History", systemImage: "clock.arrow.circlepath")
                 }
+
+            SettingsView()
+                .tabItem {
+                    Label("Settings", systemImage: "gearshape")
+                }
         }
         .preferredColorScheme(.dark)
     }

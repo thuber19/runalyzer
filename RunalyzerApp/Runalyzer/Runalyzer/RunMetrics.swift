@@ -201,13 +201,13 @@ class RunMetrics: ObservableObject {
 
         // Step 6: Determine dominant gyro axis for L/R detection
         // Find which gyro axis has the most variance — that's the pelvic rotation axis
-        func variance(_ arr: [Float]) -> Float {
+        func gyroVariance(_ arr: [Float]) -> Float {
             let m = arr.reduce(0, +) / Float(arr.count)
             return arr.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Float(arr.count)
         }
-        let varX = variance(gyroX)
-        let varY = variance(gyroY)
-        let varZ = variance(gyroZ)
+        let varX = gyroVariance(gyroX)
+        let varY = gyroVariance(gyroY)
+        let varZ = gyroVariance(gyroZ)
         let dominantGyro: [Float]
         let dominantAxis: String
         if varX >= varY && varX >= varZ {

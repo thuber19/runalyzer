@@ -4,11 +4,12 @@ import HealthKit
 
 struct SessionListView: View {
     @EnvironmentObject var sessions: SessionStore
+    @EnvironmentObject var ble: BLEManager
 
     var body: some View {
         NavigationStack {
             Group {
-                if sessions.sessions.isEmpty {
+                if sessions.sessions.isEmpty && ble.appState != .downloading {
                     VStack(spacing: 12) {
                         Image(systemName: "figure.run")
                             .font(.system(size: 48))
@@ -22,6 +23,22 @@ struct SessionListView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
+                        // Show active download at top of list
+                        if ble.appState == .downloading {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Downloading session...")
+                                        .font(.headline)
+                                    ProgressView(value: ble.downloadProgress)
+                                        .tint(.cyan)
+                                }
+                                Spacer()
+                                Text("\(Int(ble.downloadProgress * 100))%")
+                                    .font(.title3.monospacedDigit())
+                                    .foregroundColor(.cyan)
+                            }
+                            .padding(.vertical, 4)
+                        }
                         ForEach(sessions.sessions) { session in
                             NavigationLink(destination: SessionDetailView(session: session)) {
                                 HStack {
@@ -47,8 +64,9 @@ struct SessionListView: View {
                             }
                         }
                         .onDelete { indexSet in
-                            for i in indexSet {
-                                sessions.deleteSession(sessions.sessions[i])
+                            let toDelete = indexSet.map { sessions.sessions[$0] }
+                            for session in toDelete {
+                                sessions.deleteSession(session)
                             }
                         }
                     }
@@ -70,8 +88,6 @@ struct SessionDetailView: View {
     @State private var samples: [RecordedSample] = []
     @State private var showWorkoutPicker = false
     @State private var selectedWorkout: AppleWorkout?
-    @State private var showDebug = false
-    @State private var debugText = ""
     @State private var appleData: AppleRunData?
     @State private var loadingAppleData = false
     @State private var analysis: RecordingAnalysis?
@@ -150,22 +166,6 @@ struct SessionDetailView: View {
                         .cornerRadius(12)
                 }
 
-                // Debug dump
-                Button(action: {
-                    let end = session.endDate ?? session.date.addingTimeInterval(session.duration)
-                    debugText = "Loading..."
-                    showDebug = true
-                    healthKit.debugDump(from: session.date.addingTimeInterval(-1800), to: end.addingTimeInterval(1800)) { text in
-                        debugText = text
-                    }
-                }) {
-                    Label("Debug: Dump Health Data", systemImage: "ladybug")
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.gray.opacity(0.2))
-                        .foregroundColor(.gray)
-                        .cornerRadius(12)
-                }
             }
             .padding()
         }
@@ -191,27 +191,6 @@ struct SessionDetailView: View {
         .sheet(isPresented: $showShareSheet) {
             if let url = csvURL {
                 ShareSheet(items: [url])
-            }
-        }
-        .sheet(isPresented: $showDebug) {
-            NavigationStack {
-                ScrollView {
-                    Text(debugText)
-                        .font(.system(size: 11, design: .monospaced))
-                        .padding()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .navigationTitle("Health Data Debug")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { showDebug = false }
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Copy") { UIPasteboard.general.string = debugText }
-                    }
-                }
             }
         }
     }
@@ -595,7 +574,6 @@ struct SessionDetailView: View {
             Text("Green = accel magnitude, Red = heart rate")
                 .font(.system(size: 9)).foregroundColor(.gray.opacity(0.6))
 
-            let workoutStart = data.heartRateSamples.first?.date ?? session.date
             let sessionStart = session.date
 
             // Downsample accel to ~1 per second

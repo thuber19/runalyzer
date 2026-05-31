@@ -122,10 +122,6 @@ class HealthKitManager: ObservableObject {
         store.execute(query)
     }
 
-    // Not used — read-only approach
-    func startWorkout() {}
-    func stopWorkout(completion: @escaping (HKWorkout?) -> Void) { completion(nil) }
-
     // MARK: - Fetch Detailed Data for a Workout
     func fetchRunData(from startDate: Date, to endDate: Date, completion: @escaping (AppleRunData) -> Void) {
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
@@ -224,8 +220,8 @@ class HealthKitManager: ObservableObject {
     // MARK: - Debug: dump all data types available for a time range
     func debugDump(from startDate: Date, to endDate: Date, completion: @escaping (String) -> Void) {
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
-        var output = "=== HEALTH DATA DEBUG DUMP ===\n"
-        output += "Range: \(startDate) to \(endDate)\n\n"
+        let serialQueue = DispatchQueue(label: "healthkit.debug")
+        var outputParts: [String] = ["=== HEALTH DATA DEBUG DUMP ===\nRange: \(startDate) to \(endDate)\n\n"]
 
         let typesToCheck: [(String, HKQuantityTypeIdentifier, HKUnit)] = [
             ("Heart Rate", .heartRate, HKUnit.count().unitDivided(by: .minute())),
@@ -243,7 +239,7 @@ class HealthKitManager: ObservableObject {
         for (name, identifier, unit) in typesToCheck {
             group.enter()
             guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else {
-                output += "[\(name)] Type not available\n"
+                serialQueue.sync { outputParts.append("[\(name)] Type not available\n") }
                 group.leave()
                 continue
             }
@@ -251,27 +247,27 @@ class HealthKitManager: ObservableObject {
             let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: HKObjectQueryNoLimit,
                                       sortDescriptors: [sort]) { _, results, error in
                 let samples = results as? [HKQuantitySample] ?? []
-                output += "[\(name)] \(samples.count) samples"
-                if let e = error { output += " (error: \(e.localizedDescription))" }
-                output += "\n"
+                var part = "[\(name)] \(samples.count) samples"
+                if let e = error { part += " (error: \(e.localizedDescription))" }
+                part += "\n"
                 if !samples.isEmpty {
-                    // Show first 5 and last 5
                     let show = min(5, samples.count)
                     for i in 0..<show {
                         let s = samples[i]
                         let val = s.quantity.doubleValue(for: unit)
-                        output += "  [\(i)] \(s.startDate) → \(s.endDate): \(String(format: "%.4f", val)) \(unit)\n"
+                        part += "  [\(i)] \(s.startDate) → \(s.endDate): \(String(format: "%.4f", val)) \(unit)\n"
                     }
                     if samples.count > 10 {
-                        output += "  ... (\(samples.count - 10) more) ...\n"
+                        part += "  ... (\(samples.count - 10) more) ...\n"
                         for i in (samples.count - 5)..<samples.count {
                             let s = samples[i]
                             let val = s.quantity.doubleValue(for: unit)
-                            output += "  [\(i)] \(s.startDate) → \(s.endDate): \(String(format: "%.4f", val)) \(unit)\n"
+                            part += "  [\(i)] \(s.startDate) → \(s.endDate): \(String(format: "%.4f", val)) \(unit)\n"
                         }
                     }
                 }
-                output += "\n"
+                part += "\n"
+                serialQueue.sync { outputParts.append(part) }
                 group.leave()
             }
             self.store.execute(query)
@@ -283,23 +279,21 @@ class HealthKitManager: ObservableObject {
         let workoutQuery = HKSampleQuery(sampleType: HKObjectType.workoutType(), predicate: predicate,
                                          limit: 10, sortDescriptors: [workoutSort]) { _, results, error in
             let workouts = results as? [HKWorkout] ?? []
-            output += "[Workouts] \(workouts.count) found\n"
-            if let e = error { output += "  error: \(e.localizedDescription)\n" }
+            var part = "[Workouts] \(workouts.count) found\n"
+            if let e = error { part += "  error: \(e.localizedDescription)\n" }
             for (i, w) in workouts.enumerated() {
-                output += "  [\(i)] \(w.workoutActivityType.rawValue) \(w.startDate) → \(w.endDate)\n"
-                output += "       duration: \(String(format: "%.0f", w.duration))s\n"
-                output += "       source: \(w.sourceRevision.source.name)\n"
-                if let events = w.workoutEvents {
-                    output += "       events: \(events.count)\n"
-                }
+                part += "  [\(i)] \(w.workoutActivityType.rawValue) \(w.startDate) → \(w.endDate)\n"
+                part += "       duration: \(String(format: "%.0f", w.duration))s\n"
+                part += "       source: \(w.sourceRevision.source.name)\n"
             }
-            output += "\n"
+            part += "\n"
+            serialQueue.sync { outputParts.append(part) }
             group.leave()
         }
         store.execute(workoutQuery)
 
         group.notify(queue: .main) {
-            completion(output)
+            completion(outputParts.joined())
         }
     }
 }

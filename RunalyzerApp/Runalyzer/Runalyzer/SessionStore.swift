@@ -3,12 +3,8 @@ import Combine
 
 struct RecordedSample: Codable {
     let timestamp: UInt32
-    let ax: Int16
-    let ay: Int16
-    let az: Int16
-    let gx: Int16
-    let gy: Int16
-    let gz: Int16
+    let ax, ay, az: Int16
+    let gx, gy, gz: Int16
 }
 
 struct RunSession: Identifiable, Codable {
@@ -19,15 +15,16 @@ struct RunSession: Identifiable, Codable {
     var sampleCount: Int
     var avgCadence: Int
     var totalSteps: Int?
-    // Samples stored in separate file, not in the session list
     var samplesFileName: String
 
-    var dateString: String {
+    private static let fmt: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .short
-        return f.string(from: date)
-    }
+        return f
+    }()
+
+    var dateString: String { Self.fmt.string(from: date) }
 
     var durationString: String {
         let m = Int(duration) / 60
@@ -38,12 +35,6 @@ struct RunSession: Identifiable, Codable {
 
 class SessionStore: ObservableObject {
     @Published var sessions: [RunSession] = []
-    @Published var isRecording: Bool = false
-
-    private var currentSamples: [RecordedSample] = []
-    private var recordingStart: Date?
-    private var cadenceSum: Int = 0
-    private var cadenceCount: Int = 0
 
     private var storageDir: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -60,61 +51,37 @@ class SessionStore: ObservableObject {
         loadSessions()
     }
 
-    func startRecording(healthKit: HealthKitManager? = nil) {
-        currentSamples.removeAll()
-        recordingStart = Date()
-        cadenceSum = 0
-        cadenceCount = 0
-        isRecording = true
-        healthKit?.startWorkout()
-    }
+    /// Save a session downloaded from device flash. Returns true on success.
+    @discardableResult
+    func saveDownloadedSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double) -> Bool {
+        guard !samples.isEmpty else { return false }
 
-    func stopRecording(metrics: RunMetrics, healthKit: HealthKitManager? = nil) {
-        isRecording = false
-        guard let start = recordingStart, !currentSamples.isEmpty else { return }
-
-        let endDate = Date()
         let fileName = "samples_\(UUID().uuidString.prefix(8)).json"
-
-        // Run offline step analysis
-        let analysis = RunMetrics.analyzeRecording(currentSamples)
-        print("Recording analysis: \(analysis.totalSteps) steps, \(String(format: "%.0f", analysis.avgCadence)) avg SPM")
+        let analysis = RunMetrics.analyzeRecording(samples)
 
         let session = RunSession(
             id: UUID(),
-            date: start,
-            endDate: endDate,
-            duration: endDate.timeIntervalSince(start),
-            sampleCount: currentSamples.count,
+            date: Date().addingTimeInterval(-durationSec),
+            endDate: Date(),
+            duration: durationSec,
+            sampleCount: samples.count,
             avgCadence: Int(analysis.avgCadence),
             totalSteps: analysis.totalSteps,
             samplesFileName: fileName
         )
 
-        healthKit?.stopWorkout { _ in }
-
-        // Save samples to separate file
-        print("Saving \(currentSamples.count) samples to \(fileName)")
         do {
-            let data = try JSONEncoder().encode(currentSamples)
-            let fileURL = storageDir.appendingPathComponent(fileName)
-            try data.write(to: fileURL)
-            print("Saved \(data.count) bytes to \(fileURL.path)")
+            let data = try JSONEncoder().encode(samples)
+            try data.write(to: storageDir.appendingPathComponent(fileName))
+            print("Saved session: \(samples.count) samples, \(analysis.totalSteps) steps")
         } catch {
-            print("Failed to save samples: \(error)")
+            print("FAILED to save session: \(error)")
+            return false
         }
 
         sessions.insert(session, at: 0)
         saveSessions()
-        currentSamples.removeAll()
-    }
-
-    func addSample(_ packet: IMUPacket) {
-        currentSamples.append(RecordedSample(
-            timestamp: packet.timestamp,
-            ax: packet.ax, ay: packet.ay, az: packet.az,
-            gx: packet.gx, gy: packet.gy, gz: packet.gz
-        ))
+        return true
     }
 
     func loadSamples(for session: RunSession) -> [RecordedSample] {
@@ -125,17 +92,24 @@ class SessionStore: ObservableObject {
     }
 
     func deleteSession(_ session: RunSession) {
-        let samplesURL = storageDir.appendingPathComponent(session.samplesFileName)
-        try? FileManager.default.removeItem(at: samplesURL)
+        try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(session.samplesFileName))
         sessions.removeAll { $0.id == session.id }
+        saveSessions()
+    }
+
+    func clearAllSessions() {
+        for s in sessions {
+            try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(s.samplesFileName))
+        }
+        sessions.removeAll()
         saveSessions()
     }
 
     func exportCSV(session: RunSession) -> URL? {
         let samples = loadSamples(for: session)
-        let tmpURL = FileManager.default.temporaryDirectory
+        let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("runalyzer_\(session.id.uuidString.prefix(8)).csv")
-        var csv = "timestamp_ms,ax_raw,ay_raw,az_raw,gx_raw,gy_raw,gz_raw,accel_g,gyro_dps\n"
+        var csv = "timestamp_ms,ax,ay,az,gx,gy,gz,accel_g,gyro_dps\n"
         for s in samples {
             let ag = sqrtf(pow(Float(s.ax) * IMUPacket.accelScale, 2) +
                           pow(Float(s.ay) * IMUPacket.accelScale, 2) +
@@ -146,8 +120,8 @@ class SessionStore: ObservableObject {
             csv += "\(s.timestamp),\(s.ax),\(s.ay),\(s.az),\(s.gx),\(s.gy),\(s.gz),\(String(format: "%.4f", ag)),\(String(format: "%.1f", gg))\n"
         }
         do {
-            try csv.write(to: tmpURL, atomically: true, encoding: .utf8)
-            return tmpURL
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+            return url
         } catch {
             return nil
         }
