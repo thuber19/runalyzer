@@ -15,6 +15,7 @@ struct RunSession: Identifiable, Codable {
     var sampleCount: Int
     var avgCadence: Int
     var totalSteps: Int?
+    var linkedWorkoutID: String?  // Apple Health workout UUID
     var samplesFileName: String
 
     private static let fmt: DateFormatter = {
@@ -82,6 +83,18 @@ class SessionStore: ObservableObject {
         sessions.insert(session, at: 0)
         saveSessions()
         return true
+    }
+
+    func linkWorkout(_ workoutID: String, to sessionID: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        sessions[idx].linkedWorkoutID = workoutID
+        saveSessions()
+    }
+
+    func unlinkWorkout(from sessionID: UUID) {
+        guard let idx = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        sessions[idx].linkedWorkoutID = nil
+        saveSessions()
     }
 
     func loadSamples(for session: RunSession) -> [RecordedSample] {

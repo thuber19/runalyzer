@@ -176,10 +176,25 @@ struct SessionDetailView: View {
             if !samples.isEmpty {
                 analysis = RunMetrics.analyzeRecording(samples)
             }
+            // Reload linked workout if saved
+            if let wid = session.linkedWorkoutID, selectedWorkout == nil {
+                healthKit.fetchWorkout(byID: wid) { workout in
+                    selectedWorkout = workout
+                    if let w = workout {
+                        loadingAppleData = true
+                        healthKit.fetchRunData(from: w.startDate, to: w.endDate) { data in
+                            appleData = data
+                            loadingAppleData = false
+                        }
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showWorkoutPicker) {
             WorkoutPickerView(session: session, selectedWorkout: $selectedWorkout) {
                 if let w = selectedWorkout {
+                    // Persist the link
+                    sessions.linkWorkout(w.id.uuidString, to: session.id)
                     loadingAppleData = true
                     healthKit.fetchRunData(from: w.startDate, to: w.endDate) { data in
                         appleData = data

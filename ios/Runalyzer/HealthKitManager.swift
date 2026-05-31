@@ -62,6 +62,17 @@ struct AppleRunData {
     var distanceKm: Double { distanceMeters / 1000 }
 }
 
+struct HealthSummary {
+    var steps: Int = 0
+    var distanceMeters: Double = 0
+    var calories: Double = 0
+    var latestHR: Double = 0
+    var avgHR: Double = 0
+    var minHR: Double = 0
+    var maxHR: Double = 0
+    var distanceKm: Double { distanceMeters / 1000 }
+}
+
 class HealthKitManager: ObservableObject {
     let store = HKHealthStore()
 
@@ -120,6 +131,56 @@ class HealthKitManager: ObservableObject {
             }
         }
         store.execute(query)
+    }
+
+    // MARK: - Fetch Workout by UUID
+    func fetchWorkout(byID uuidString: String, completion: @escaping (AppleWorkout?) -> Void) {
+        guard let uuid = UUID(uuidString: uuidString) else { completion(nil); return }
+        let predicate = HKQuery.predicateForObject(with: uuid)
+        let query = HKSampleQuery(sampleType: HKObjectType.workoutType(), predicate: predicate,
+                                  limit: 1, sortDescriptors: nil) { _, results, _ in
+            let workout = (results as? [HKWorkout])?.first.map { AppleWorkout(id: $0.uuid, workout: $0) }
+            DispatchQueue.main.async { completion(workout) }
+        }
+        store.execute(query)
+    }
+
+    // MARK: - Fetch Today's Summary
+    func fetchTodaySummary(completion: @escaping (HealthSummary) -> Void) {
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: Date())
+        let end = Date()
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        var summary = HealthSummary()
+        let group = DispatchGroup()
+
+        group.enter()
+        fetchCumulativeStat(.stepCount, predicate: predicate) { val in
+            summary.steps = Int(val); group.leave()
+        }
+        group.enter()
+        fetchCumulativeStat(.distanceWalkingRunning, predicate: predicate) { val in
+            summary.distanceMeters = val; group.leave()
+        }
+        group.enter()
+        fetchCumulativeStat(.activeEnergyBurned, predicate: predicate) { val in
+            summary.calories = val; group.leave()
+        }
+        group.enter()
+        fetchSamples(.heartRate, predicate: predicate) { samples in
+            if let last = samples.last {
+                summary.latestHR = last.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+            }
+            if !samples.isEmpty {
+                let hrs = samples.map { $0.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute())) }
+                summary.avgHR = hrs.reduce(0, +) / Double(hrs.count)
+                summary.minHR = hrs.min() ?? 0
+                summary.maxHR = hrs.max() ?? 0
+            }
+            group.leave()
+        }
+
+        group.notify(queue: .main) { completion(summary) }
     }
 
     // MARK: - Fetch Detailed Data for a Workout
