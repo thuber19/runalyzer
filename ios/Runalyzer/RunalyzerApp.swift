@@ -23,11 +23,13 @@ struct RunalyzerApp: App {
                     ble.onBattery = { level in
                         metrics.batteryLevel = level
                     }
-                    ble.onDownloadComplete = { samples, status in
+                    ble.onDownloadComplete = { samples, status, events in
                         let saved = sessions.saveDownloadedSession(
                             samples: samples,
                             sampleRateHz: Int(status.sampleRateHz),
-                            durationSec: Double(status.recordingDurationSec)
+                            durationSec: Double(status.recordingDurationSec),
+                            startUnixMs: status.recordingStartUnixMs,
+                            events: events.isEmpty ? nil : events
                         )
                         if saved {
                             ble.eraseData()

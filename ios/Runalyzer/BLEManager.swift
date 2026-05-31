@@ -39,8 +39,14 @@ struct DeviceStatus {
     var sampleRateHz: UInt8 = 25
     var batteryPercent: UInt8 = 0
     var isCharging: Bool = false
+    var isTimeSynced: Bool = false
     var maxSamples: UInt32 = 0
     var recordingDurationSec: UInt32 = 0
+    var recordingStartUnixMs: UInt64 = 0  // wall-clock start time
+
+    var recordingStartDate: Date? {
+        recordingStartUnixMs > 0 ? Date(timeIntervalSince1970: Double(recordingStartUnixMs) / 1000.0) : nil
+    }
 
     var durationString: String {
         let m = recordingDurationSec / 60
@@ -87,6 +93,7 @@ class BLEManager: NSObject, ObservableObject {
     private let statusCharUUID   = CBUUID(string: "12345678-1234-5678-1234-56789abcdef3")
     private let downloadCharUUID = CBUUID(string: "12345678-1234-5678-1234-56789abcdef4")
     private let configCharUUID   = CBUUID(string: "12345678-1234-5678-1234-56789abcdef5")
+    private let timesyncCharUUID = CBUUID(string: "12345678-1234-5678-1234-56789abcdef6")
     private let battServiceUUID  = CBUUID(string: "180F")
     private let battCharUUID     = CBUUID(string: "2A19")
 
@@ -96,6 +103,7 @@ class BLEManager: NSObject, ObservableObject {
     private var statusChar: CBCharacteristic?
     private var downloadChar: CBCharacteristic?
     private var configChar: CBCharacteristic?
+    private var timesyncChar: CBCharacteristic?
 
     // Published state
     @Published var connected = false
@@ -106,10 +114,11 @@ class BLEManager: NSObject, ObservableObject {
     // Callbacks
     var onPacket: ((IMUPacket) -> Void)?
     var onBattery: ((Int) -> Void)?
-    var onDownloadComplete: (([RecordedSample], DeviceStatus) -> Void)?
+    var onDownloadComplete: (([RecordedSample], DeviceStatus, [DeviceEvent]) -> Void)?
 
     // Download state (private)
     private var downloadedSamples: [RecordedSample] = []
+    private var downloadedEvents: [DeviceEvent] = []
     private var expectedDownloadCount: UInt32 = 0
     private var downloadTimeoutTimer: Timer?
     private var firstStatusReceived = false
@@ -134,10 +143,20 @@ class BLEManager: NSObject, ObservableObject {
     }
 
     func startRecording() {
-        guard appState == .idle else { return }
+        // Block if device has unsynced data that hasn't been downloaded yet
+        if deviceStatus.state == .hasData && deviceStatus.sampleCount > 0 && appState != .downloading {
+            print("Cannot start: device has unsynced data. Download first.")
+            return
+        }
+        // Block if download is in progress
+        if appState == .downloading {
+            print("Cannot start: download in progress. Wait for sync to complete.")
+            return
+        }
+        guard appState != .recording && appState != .stopping else { return }
         appState = .recording
         UserDefaults.standard.set(true, forKey: wasRecordingKey)
-        sendCommand(1)
+        sendCommand(1) // firmware erases old data and starts
     }
 
     func stopRecording() {
@@ -149,6 +168,17 @@ class BLEManager: NSObject, ObservableObject {
 
     func eraseData() {
         sendCommand(3)
+    }
+
+    func syncTime() {
+        guard let char = timesyncChar, let p = peripheral else { return }
+        let unixMs = UInt64(Date().timeIntervalSince1970 * 1000)
+        var data = Data(count: 8)
+        data.withUnsafeMutableBytes { buf in
+            buf.storeBytes(of: unixMs, as: UInt64.self)
+        }
+        p.writeValue(data, for: char, type: .withResponse)
+        print("Time synced: \(unixMs)")
     }
 
     func setSampleRate(_ hz: UInt8) {
@@ -197,27 +227,46 @@ class BLEManager: NSObject, ObservableObject {
             deviceStatus.sampleCount = buf.loadUnaligned(fromByteOffset: 1, as: UInt32.self)
             deviceStatus.sampleRateHz = buf.loadUnaligned(fromByteOffset: 5, as: UInt8.self)
             deviceStatus.batteryPercent = buf.loadUnaligned(fromByteOffset: 6, as: UInt8.self)
-            deviceStatus.isCharging = buf.loadUnaligned(fromByteOffset: 7, as: UInt8.self) == 1
+            let flags = buf.loadUnaligned(fromByteOffset: 7, as: UInt8.self)
+            deviceStatus.isCharging = (flags & 0x01) != 0
+            deviceStatus.isTimeSynced = (flags & 0x02) != 0
             deviceStatus.maxSamples = buf.loadUnaligned(fromByteOffset: 8, as: UInt32.self)
             deviceStatus.recordingDurationSec = buf.loadUnaligned(fromByteOffset: 12, as: UInt32.self)
+            if data.count >= 24 {
+                deviceStatus.recordingStartUnixMs = buf.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
+            }
         }
         onBattery?(Int(deviceStatus.batteryPercent))
 
-        // First status after connect — reconcile app state with device
+        // First status after connect — full reconcile
         if !firstStatusReceived {
             firstStatusReceived = true
             reconcileState()
+            return
         }
 
-        // Auto-download: only on first transition to hasData from stopping
-        // Don't keep retrying — user can manually retry from Settings
+        // Continuous state monitoring — catch device-side changes
+        // Device stopped recording unexpectedly (battery, memory full)
+        if appState == .recording && deviceStatus.state != .recording {
+            UserDefaults.standard.set(false, forKey: wasRecordingKey)
+            if deviceStatus.state == .hasData && deviceStatus.sampleCount > 0 {
+                print("Device stopped recording — has data, starting download")
+                startDownload()
+            } else {
+                appState = .idle
+            }
+        }
+
+        // Auto-download after user stopped recording
         if deviceStatus.state == .hasData && deviceStatus.sampleCount > 0 && appState == .stopping {
             startDownload()
         }
 
-        // Device erased successfully — go back to idle
-        if deviceStatus.state == .idle && (appState == .downloading || appState == .error("Download timed out")) {
-            appState = .idle
+        // Device erased — go back to idle
+        if deviceStatus.state == .idle && appState != .recording {
+            if appState == .downloading || appState == .stopping {
+                appState = .idle
+            }
         }
     }
 
@@ -255,22 +304,43 @@ class BLEManager: NSObject, ObservableObject {
 
             let samples = downloadedSamples
             let status = deviceStatus
-            print("Download complete: \(samples.count) samples received")
+            let events = downloadedEvents
+            print("Download complete: \(samples.count) samples, \(events.count) events")
 
             appState = .idle
-            onDownloadComplete?(samples, status)
+            onDownloadComplete?(samples, status, events)
             downloadedSamples.removeAll()
+            downloadedEvents.removeAll()
             return
         }
 
-        guard data.count >= 20 else { return } // at least 4 byte header + 1 sample
+        // Event log packet: marker = 0xFFFFFFFE
+        if data.count >= 5 {
+            let marker = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt32.self) }
+            if marker == 0xFFFFFFFE {
+                let count = Int(data[4])
+                downloadedEvents.removeAll()
+                for i in 0..<count {
+                    let off = 5 + (i * 5)
+                    guard off + 5 <= data.count else { break }
+                    let reason = data[off]
+                    let ts = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: off + 1, as: UInt32.self) }
+                    downloadedEvents.append(DeviceEvent(reason: reason, timestampSec: ts))
+                }
+                print("Received \(downloadedEvents.count) events")
+                requestNextChunk()
+                return
+            }
+        }
 
-        // Parse: [4 bytes offset] + [N * 16 bytes samples]
+        guard data.count >= 16 else { return } // at least 4 byte header + 1 sample (12 bytes)
+
+        // Parse: [4 bytes offset] + [N * 12 bytes samples (no timestamp)]
         let sampleBytes = data.count - 4
-        let numSamples = sampleBytes / 16
+        let sampleSize = 12
+        let numSamples = sampleBytes / sampleSize
         guard numSamples > 0 else { return }
 
-        // Validate offset matches expected position
         let reportedOffset = data.withUnsafeBytes { buf in
             buf.loadUnaligned(fromByteOffset: 0, as: UInt32.self)
         }
@@ -279,18 +349,24 @@ class BLEManager: NSObject, ObservableObject {
             print("WARNING: offset mismatch — expected \(expectedOffset), got \(reportedOffset)")
         }
 
+        // Reconstruct timestamps from sample index and rate
+        let rate = max(1, UInt32(deviceStatus.sampleRateHz))
+        let intervalMs = 1000 / rate
+
         data.withUnsafeBytes { buf in
             for i in 0..<numSamples {
-                let off = 4 + (i * 16)
-                guard off + 16 <= data.count else { break }
+                let off = 4 + (i * sampleSize)
+                guard off + sampleSize <= data.count else { break }
+                let sampleIndex = UInt32(downloadedSamples.count)
+                let timestamp = sampleIndex * intervalMs  // derived timestamp
                 downloadedSamples.append(RecordedSample(
-                    timestamp: buf.loadUnaligned(fromByteOffset: off, as: UInt32.self),
-                    ax: buf.loadUnaligned(fromByteOffset: off + 4, as: Int16.self),
-                    ay: buf.loadUnaligned(fromByteOffset: off + 6, as: Int16.self),
-                    az: buf.loadUnaligned(fromByteOffset: off + 8, as: Int16.self),
-                    gx: buf.loadUnaligned(fromByteOffset: off + 10, as: Int16.self),
-                    gy: buf.loadUnaligned(fromByteOffset: off + 12, as: Int16.self),
-                    gz: buf.loadUnaligned(fromByteOffset: off + 14, as: Int16.self)
+                    timestamp: timestamp,
+                    ax: buf.loadUnaligned(fromByteOffset: off, as: Int16.self),
+                    ay: buf.loadUnaligned(fromByteOffset: off + 2, as: Int16.self),
+                    az: buf.loadUnaligned(fromByteOffset: off + 4, as: Int16.self),
+                    gx: buf.loadUnaligned(fromByteOffset: off + 6, as: Int16.self),
+                    gy: buf.loadUnaligned(fromByteOffset: off + 8, as: Int16.self),
+                    gz: buf.loadUnaligned(fromByteOffset: off + 10, as: Int16.self)
                 ))
             }
         }
@@ -344,7 +420,7 @@ extension BLEManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         connected = false
-        controlChar = nil; statusChar = nil; downloadChar = nil; configChar = nil
+        controlChar = nil; statusChar = nil; downloadChar = nil; configChar = nil; timesyncChar = nil
         downloadTimeoutTimer?.invalidate()
 
         let previousState = appState
@@ -392,6 +468,9 @@ extension BLEManager: CBPeripheralDelegate {
             case configCharUUID:
                 configChar = char
                 peripheral.readValue(for: char)
+            case timesyncCharUUID:
+                timesyncChar = char
+                syncTime()
             case battCharUUID:
                 peripheral.readValue(for: char)
             default: break

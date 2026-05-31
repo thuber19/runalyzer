@@ -83,8 +83,14 @@ struct SessionDetailView: View {
     let session: RunSession
     @EnvironmentObject var sessions: SessionStore
     @EnvironmentObject var healthKit: HealthKitManager
-    @State private var showShareSheet = false
-    @State private var csvURL: URL?
+    @State private var shareURL: ShareableURL?
+
+    private static let eventFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .none
+        f.timeStyle = .medium
+        return f
+    }()
     @State private var samples: [RecordedSample] = []
     @State private var showWorkoutPicker = false
     @State private var selectedWorkout: AppleWorkout?
@@ -203,24 +209,18 @@ struct SessionDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showShareSheet) {
-            if let url = csvURL {
-                ShareSheet(items: [url])
-            }
+        .sheet(item: $shareURL) { item in
+            ShareSheet(items: [item.url])
         }
     }
 
     // MARK: - Export
     private func exportCSV() {
         guard let url = sessions.exportCSV(session: session) else {
-            print("CSV export failed")
+            print("CSV export failed: no samples")
             return
         }
-        csvURL = url
-        // Small delay to ensure state update before presenting sheet
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            showShareSheet = true
-        }
+        shareURL = ShareableURL(url: url)
     }
 
     // MARK: - IMU Step Analysis
@@ -464,6 +464,26 @@ struct SessionDetailView: View {
                     }
                 }
             }
+
+            if let events = session.events, !events.isEmpty {
+                Divider().background(Color.gray.opacity(0.3))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("DEVICE LOG").font(.caption2).foregroundColor(.gray)
+                    ForEach(events) { event in
+                        HStack(spacing: 8) {
+                            Image(systemName: event.icon)
+                                .font(.caption).foregroundColor(.gray)
+                                .frame(width: 16)
+                            Text(event.reasonString).font(.caption)
+                            Spacer()
+                            if event.timestampSec > 1000000000 {
+                                Text(Self.eventFmt.string(from: Date(timeIntervalSince1970: Double(event.timestampSec))))
+                                    .font(.caption2.monospacedDigit()).foregroundColor(.gray)
+                            }
+                        }
+                    }
+                }
+            }
         }
         .padding()
         .frame(maxWidth: .infinity)
@@ -589,40 +609,43 @@ struct SessionDetailView: View {
             Text("Green = accel magnitude, Red = heart rate")
                 .font(.system(size: 9)).foregroundColor(.gray.opacity(0.6))
 
-            let sessionStart = session.date
-
-            // Downsample accel to ~1 per second
-            let step = max(1, samples.count / Int(session.duration))
-            let accelPoints: [TimestampedValue] = stride(from: 0, to: samples.count, by: step).map { i in
-                let s = samples[i]
-                let ax = Float(s.ax) * IMUPacket.accelScale
-                let ay = Float(s.ay) * IMUPacket.accelScale
-                let az = Float(s.az) * IMUPacket.accelScale
-                let mag = Double(sqrtf(ax*ax + ay*ay + az*az))
-                let elapsed = Double(s.timestamp - samples[0].timestamp) / 1000.0
-                let date = sessionStart.addingTimeInterval(elapsed)
-                return TimestampedValue(date: date, value: mag)
-            }
-
             Canvas { context, size in
                 let w = size.width
                 let h = size.height
+                guard !samples.isEmpty, !data.heartRateSamples.isEmpty else { return }
 
-                // Find common time range
-                let allDates = accelPoints.map(\.date) + data.heartRateSamples.map(\.date)
-                guard let minDate = allDates.min(), let maxDate = allDates.max() else { return }
-                let timeRange = maxDate.timeIntervalSince(minDate)
-                guard timeRange > 0 else { return }
+                // Find the common time range across both datasets
+                let imuStart = session.date  // wall-clock start (synced from device)
+                let imuEnd = imuStart.addingTimeInterval(Double(samples.last!.timestamp - samples[0].timestamp) / 1000.0)
+                guard let hrStart = data.heartRateSamples.first?.date,
+                      let hrEnd = data.heartRateSamples.last?.date else { return }
+
+                // Absolute time range covering both datasets
+                let rangeStart = min(imuStart, hrStart)
+                let rangeEnd = max(imuEnd, hrEnd)
+                let totalDuration = rangeEnd.timeIntervalSince(rangeStart)
+                guard totalDuration > 0 else { return }
 
                 func xFor(_ date: Date) -> CGFloat {
-                    CGFloat(date.timeIntervalSince(minDate) / timeRange) * w
+                    CGFloat(date.timeIntervalSince(rangeStart) / totalDuration) * w
+                }
+                func xForIMU(_ sample: RecordedSample) -> CGFloat {
+                    let elapsed = Double(sample.timestamp - samples[0].timestamp) / 1000.0
+                    let date = imuStart.addingTimeInterval(elapsed)
+                    return xFor(date)
                 }
 
-                // Accel (0-3g mapped to full height)
+                // Accel magnitude (downsample to ~1 per pixel)
+                let step = max(1, samples.count / Int(w))
                 var accelPath = Path()
-                for (i, p) in accelPoints.enumerated() {
-                    let x = xFor(p.date)
-                    let y = h - CGFloat(p.value / 3.0) * h
+                for i in stride(from: 0, to: samples.count, by: step) {
+                    let s = samples[i]
+                    let ax = Float(s.ax) * IMUPacket.accelScale
+                    let ay = Float(s.ay) * IMUPacket.accelScale
+                    let az = Float(s.az) * IMUPacket.accelScale
+                    let mag = Double(sqrtf(ax*ax + ay*ay + az*az))
+                    let x = xForIMU(s)
+                    let y = h - CGFloat(mag / 3.0) * h
                     if i == 0 { accelPath.move(to: CGPoint(x: x, y: y)) }
                     else { accelPath.addLine(to: CGPoint(x: x, y: y)) }
                 }
@@ -806,6 +829,12 @@ struct WorkoutPickerView: View {
 }
 
 // MARK: - Share Sheet
+
+struct ShareableURL: Identifiable {
+    let id = UUID()
+    let url: URL
+}
+
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
     func makeUIViewController(context: Context) -> UIActivityViewController {

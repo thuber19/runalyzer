@@ -72,22 +72,55 @@ bool imuBegin() {
 #define FLASH_SECTOR_SIZE 4096
 #define HEADER_SECTOR     0
 #define DATA_START        4096
-#define SAMPLE_SIZE       16        // 4B timestamp + 6×2B axes
+#define SAMPLE_SIZE       12        // 6×2B axes (no timestamp — derived from index × rate)
 #define HEADER_MAGIC      0x524E4C59  // "RNLY"
+
+// Event log reasons
+#define EVT_START_APP     1   // recording started via BLE command
+#define EVT_START_BUTTON  2   // recording started via physical button (future)
+#define EVT_STOP_APP      3   // recording stopped via BLE command
+#define EVT_STOP_BUTTON   4   // recording stopped via physical button (future)
+#define EVT_STOP_BATTERY  5   // recording stopped — low battery
+#define EVT_STOP_MEMORY   6   // recording stopped — flash 95% full
+#define EVT_STOP_POWER    7   // recording recovered after power loss
+#define EVT_DOWNLOAD      8   // download started
+#define EVT_ERASE         9   // data erased
+
+#define MAX_EVENTS 16
+
+struct EventEntry {
+  uint8_t  reason;
+  uint32_t timestampMs;
+};
 
 struct FlashHeader {
   uint32_t magic;
   uint32_t sampleCount;
   uint32_t sampleRateHz;
-  uint32_t recordingStartMs;
-  uint32_t recordingEndMs;
+  uint64_t recordingStartUnix;  // Unix timestamp ms (wall clock)
+  uint64_t recordingEndUnix;    // Unix timestamp ms (wall clock)
   uint8_t  isRecording;
   uint8_t  hasData;
-  uint8_t  reserved[2];
+  uint8_t  eventCount;
+  uint8_t  timeSynced;          // 1 if time was synced from phone
+  EventEntry events[MAX_EVENTS];
 };
 
 static FlashHeader header;
 static uint32_t maxSamples = 0;
+
+// Time sync state
+static uint64_t syncUnixMs = 0;    // Unix ms received from phone
+static uint32_t syncMillis = 0;    // millis() at sync moment
+static bool hasTimeSync = false;
+
+// Get current wall-clock time in Unix ms
+uint64_t wallClockMs() {
+  if (hasTimeSync) {
+    return syncUnixMs + (uint64_t)(millis() - syncMillis);
+  }
+  return 0;  // unknown
+}
 static uint32_t lastErasedSector = 0xFFFFFFFF;
 
 #define WRITE_BUF_SAMPLES 256  // 256 × 16 = 4KB = 1 sector
@@ -195,16 +228,23 @@ void flashFlushBuffer() {
   writeBufCount = 0;
 }
 
-void flashAddSample(uint32_t ts, int16_t ax, int16_t ay, int16_t az,
+void flashAddSample(int16_t ax, int16_t ay, int16_t az,
                     int16_t gx, int16_t gy, int16_t gz) {
   if (header.sampleCount + writeBufCount >= maxSamples) return;
   uint8_t* p = &writeBuf[writeBufCount * SAMPLE_SIZE];
-  p[0] = ts; p[1] = ts >> 8; p[2] = ts >> 16; p[3] = ts >> 24;
-  p[4] = ax; p[5] = ax >> 8; p[6] = ay; p[7] = ay >> 8;
-  p[8] = az; p[9] = az >> 8; p[10] = gx; p[11] = gx >> 8;
-  p[12] = gy; p[13] = gy >> 8; p[14] = gz; p[15] = gz >> 8;
+  p[0] = ax; p[1] = ax >> 8; p[2] = ay; p[3] = ay >> 8;
+  p[4] = az; p[5] = az >> 8; p[6] = gx; p[7] = gx >> 8;
+  p[8] = gy; p[9] = gy >> 8; p[10] = gz; p[11] = gz >> 8;
   writeBufCount++;
   if (writeBufCount >= WRITE_BUF_SAMPLES) flashFlushBuffer();
+}
+
+void logEvent(uint8_t reason) {
+  if (header.eventCount < MAX_EVENTS) {
+    header.events[header.eventCount].reason = reason;
+    header.events[header.eventCount].timestampMs = hasTimeSync ? (uint32_t)(wallClockMs() / 1000) : millis();
+    header.eventCount++;
+  }
 }
 
 void flashEraseData() {
@@ -225,6 +265,7 @@ void flashEraseData() {
 #define STATUS_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef3"  // device status
 #define DOWNLOAD_CHAR_UUID "12345678-1234-5678-1234-56789abcdef4"  // download chunks
 #define CONFIG_CHAR_UUID   "12345678-1234-5678-1234-56789abcdef5"  // sample rate
+#define TIMESYNC_CHAR_UUID "12345678-1234-5678-1234-56789abcdef6"  // time sync (8 bytes unix ms)
 
 // Commands: 1=start, 2=stop, 3=erase, 4=begin download, 5=next chunk
 // Status byte 0: 0=idle, 1=recording, 2=hasData, 3=downloading
@@ -232,9 +273,10 @@ void flashEraseData() {
 BLEService imuService(IMU_SERVICE_UUID);
 BLECharacteristic imuChar(IMU_CHAR_UUID, BLERead | BLENotify, 16);
 BLEByteCharacteristic controlChar(CONTROL_CHAR_UUID, BLEWrite);
-BLECharacteristic statusChar(STATUS_CHAR_UUID, BLERead | BLENotify, 20);
+BLECharacteristic statusChar(STATUS_CHAR_UUID, BLERead | BLENotify, 28);
 BLECharacteristic downloadChar(DOWNLOAD_CHAR_UUID, BLERead | BLENotify, 240);
 BLEByteCharacteristic configChar(CONFIG_CHAR_UUID, BLERead | BLEWrite);
+BLECharacteristic timesyncChar(TIMESYNC_CHAR_UUID, BLEWrite, 8);  // app writes 8-byte unix ms
 
 BLEService battService("180F");
 BLEByteCharacteristic battChar("2A19", BLERead | BLENotify);
@@ -307,10 +349,11 @@ void updateStatus() {
   // [1-4]   sampleCount (LE)
   // [5]     sampleRateHz
   // [6]     batteryPercent
-  // [7]     isCharging
+  // [7]     isCharging | timeSynced (bit0=charging, bit1=timeSynced)
   // [8-11]  maxSamples (LE)
   // [12-15] durationSec (LE)
-  uint8_t buf[20] = {0};
+  // [16-23] recordingStartUnix ms (LE, uint64)
+  uint8_t buf[28] = {0};
 
   if (isDownloading)                              buf[0] = 3;
   else if (isRecording)                           buf[0] = 1;
@@ -320,23 +363,46 @@ void updateStatus() {
   buf[1] = sc; buf[2] = sc >> 8; buf[3] = sc >> 16; buf[4] = sc >> 24;
   buf[5] = (uint8_t)header.sampleRateHz;
   buf[6] = cachedBattPct;
-  buf[7] = (digitalRead(CHG_PIN) == LOW && cachedBattPct > 5 && cachedBattPct < 100) ? 1 : 0;
+  bool charging = (digitalRead(CHG_PIN) == LOW && cachedBattPct > 5 && cachedBattPct < 100);
+  buf[7] = (charging ? 0x01 : 0) | (hasTimeSync ? 0x02 : 0);
   buf[8] = maxSamples; buf[9] = maxSamples >> 8;
   buf[10] = maxSamples >> 16; buf[11] = maxSamples >> 24;
 
   uint32_t dur = 0;
-  if (isRecording && header.recordingStartMs)
-    dur = (millis() - header.recordingStartMs) / 1000;
-  else if (header.recordingEndMs > header.recordingStartMs)
-    dur = (header.recordingEndMs - header.recordingStartMs) / 1000;
+  if (isRecording && header.recordingStartUnix > 0) {
+    dur = (uint32_t)((wallClockMs() - header.recordingStartUnix) / 1000);
+  } else if (header.recordingEndUnix > header.recordingStartUnix) {
+    dur = (uint32_t)((header.recordingEndUnix - header.recordingStartUnix) / 1000);
+  }
   buf[12] = dur; buf[13] = dur >> 8; buf[14] = dur >> 16; buf[15] = dur >> 24;
 
-  statusChar.writeValue(buf, 20);
+  // Recording start time (unix ms)
+  uint64_t startUnix = header.recordingStartUnix;
+  for (int i = 0; i < 8; i++) { buf[16 + i] = (startUnix >> (i * 8)) & 0xFF; }
+
+  statusChar.writeValue(buf, 28);
 }
 
 // ===================== Download (Request-Response) =====================
 
-#define DL_SAMPLES_PER_PACKET 14  // 4 + 14*16 = 228 bytes
+#define DL_SAMPLES_PER_PACKET 19  // 4 + 19*12 = 232 bytes (fits in 240 max)
+
+// Send event log as a special download packet
+// Format: [4 bytes marker 0xFFFFFFFE] + [1 byte count] + [N * 5 bytes (reason + timestamp)]
+void sendEventLog() {
+  uint8_t packet[240];
+  packet[0] = 0xFE; packet[1] = 0xFF; packet[2] = 0xFF; packet[3] = 0xFF;  // marker
+  packet[4] = header.eventCount;
+  uint16_t offset = 5;
+  for (uint8_t i = 0; i < header.eventCount && offset + 5 <= 240; i++) {
+    packet[offset] = header.events[i].reason;
+    uint32_t ts = header.events[i].timestampMs;
+    packet[offset+1] = ts; packet[offset+2] = ts >> 8;
+    packet[offset+3] = ts >> 16; packet[offset+4] = ts >> 24;
+    offset += 5;
+  }
+  downloadChar.writeValue(packet, offset);
+}
 
 void sendNextDownloadChunk() {
   if (downloadOffset >= header.sampleCount) {
@@ -365,23 +431,27 @@ void sendNextDownloadChunk() {
 
 // ===================== Recording Control =====================
 
-void startRecording() {
+void startRecording(uint8_t reason) {
   if (isRecording || isDownloading) return;
   flashEraseData();
   header.isRecording = 1;
-  header.recordingStartMs = millis();
+  header.recordingStartUnix = wallClockMs();
+  header.timeSynced = hasTimeSync ? 1 : 0;
+  logEvent(reason);
   isRecording = true;
   sampleInterval_us = 1000000UL / header.sampleRateHz;
   Serial.print("REC @ "); Serial.print(header.sampleRateHz); Serial.println(" Hz");
+  if (hasTimeSync) { Serial.print("Start time: "); Serial.println((uint32_t)(header.recordingStartUnix / 1000)); }
   updateStatus();
 }
 
-void stopRecording() {
+void stopRecording(uint8_t reason) {
   if (!isRecording) return;
   flashFlushBuffer();
   header.isRecording = 0;
   header.hasData = (header.sampleCount > 0) ? 1 : 0;
-  header.recordingEndMs = millis();
+  header.recordingEndUnix = wallClockMs();
+  logEvent(reason);
   flashWriteHeader();
   isRecording = false;
   Serial.print("STOP: "); Serial.print(header.sampleCount); Serial.println(" samples");
@@ -390,24 +460,33 @@ void stopRecording() {
 
 void handleControl(uint8_t cmd) {
   switch (cmd) {
-    case 1: startRecording(); break;
-    case 2: stopRecording(); break;
+    case 1: startRecording(EVT_START_APP); break;
+    case 2: stopRecording(EVT_STOP_APP); break;
     case 3:
       if (!isRecording && !isDownloading) {
+        logEvent(EVT_ERASE);
         flashEraseData();
         updateStatus();
       }
       break;
     case 4:
       if (!isRecording && header.hasData && header.sampleCount > 0) {
+        logEvent(EVT_DOWNLOAD);
         isDownloading = true;
         downloadOffset = 0;
         Serial.print("DL: "); Serial.println(header.sampleCount);
+        // Send event log as first packet (marker offset = 0xFFFFFFFE)
+        sendEventLog();
         sendNextDownloadChunk();
       }
       break;
     case 5:
-      if (isDownloading) sendNextDownloadChunk();
+      // Send multiple chunks per request for faster downloads
+      if (isDownloading) {
+        for (int i = 0; i < 5 && isDownloading; i++) {
+          sendNextDownloadChunk();
+        }
+      }
       break;
   }
 }
@@ -437,8 +516,13 @@ void setup() {
   }
 
   if (header.isRecording) {
-    isRecording = true;
-    Serial.println("Resuming recording");
+    // Power was lost during recording — mark as recovered, stop cleanly
+    logEvent(EVT_STOP_POWER);
+    header.isRecording = 0;
+    header.hasData = (header.sampleCount > 0) ? 1 : 0;
+    header.recordingEndMs = millis();
+    flashWriteHeader();
+    Serial.print("Recovered recording: "); Serial.print(header.sampleCount); Serial.println(" samples");
   }
   sampleInterval_us = 1000000UL / header.sampleRateHz;
   cachedBattPct = readBatteryPercent();
@@ -456,6 +540,7 @@ void setup() {
   imuService.addCharacteristic(statusChar);
   imuService.addCharacteristic(downloadChar);
   imuService.addCharacteristic(configChar);
+  imuService.addCharacteristic(timesyncChar);
   BLE.addService(imuService);
 
   battService.addCharacteristic(battChar);
@@ -492,8 +577,21 @@ void loop() {
     }
   }
 
-  // IMU sampling
-  if (now_us - lastSample_us >= sampleInterval_us) {
+  // Time sync from phone (8 bytes = uint64 Unix ms)
+  if (timesyncChar.written()) {
+    uint8_t buf[8];
+    timesyncChar.readValue(buf, 8);
+    syncUnixMs = 0;
+    for (int i = 7; i >= 0; i--) {
+      syncUnixMs = (syncUnixMs << 8) | buf[i];
+    }
+    syncMillis = millis();
+    hasTimeSync = true;
+    Serial.print("Time synced: "); Serial.println((uint32_t)(syncUnixMs / 1000));
+  }
+
+  // IMU sampling (skip during download to maximize BLE throughput)
+  if (!isDownloading && now_us - lastSample_us >= sampleInterval_us) {
     lastSample_us += sampleInterval_us;
 
     uint8_t ad[6], gd[6];
@@ -503,7 +601,7 @@ void loop() {
     if (isRecording) {
       int16_t ax = ad[0] | (ad[1] << 8), ay = ad[2] | (ad[3] << 8), az = ad[4] | (ad[5] << 8);
       int16_t gx = gd[0] | (gd[1] << 8), gy = gd[2] | (gd[3] << 8), gz = gd[4] | (gd[5] << 8);
-      flashAddSample((uint32_t)now_ms, ax, ay, az, gx, gy, gz);
+      flashAddSample(ax, ay, az, gx, gy, gz);
     }
 
     if (bleConnected && imuChar.subscribed() && !isDownloading) {
@@ -520,6 +618,13 @@ void loop() {
   if (isRecording && now_ms - lastFlush_ms >= 10000) {
     lastFlush_ms = now_ms;
     if (writeBufCount > 0) { flashFlushBuffer(); flashWriteHeader(); }
+
+    // Auto-stop at 95% capacity to preserve data integrity
+    uint32_t totalSamples = header.sampleCount + writeBufCount;
+    if (totalSamples >= (maxSamples * 95 / 100)) {
+      Serial.println("FLASH 95% FULL — auto-stopping recording");
+      stopRecording(EVT_STOP_MEMORY);
+    }
   }
 
   // Battery check + low-battery shutdown
@@ -528,7 +633,7 @@ void loop() {
     cachedBattPct = readBatteryPercent();
     battChar.writeValue(cachedBattPct);
     if (cachedBattPct > 0 && cachedBattPct <= 10) {
-      if (isRecording) stopRecording();
+      if (isRecording) stopRecording(EVT_STOP_BATTERY);
       setLED(true, false, false); delay(2000); setLED(false, false, false);
       NRF_POWER->SYSTEMOFF = 1;
     }

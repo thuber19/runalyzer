@@ -7,6 +7,40 @@ struct RecordedSample: Codable {
     let gx, gy, gz: Int16
 }
 
+struct DeviceEvent: Codable, Identifiable {
+    var id: UUID = UUID()
+    let reason: UInt8
+    let timestampSec: UInt32  // unix seconds or millis depending on sync
+
+    var reasonString: String {
+        switch reason {
+        case 1: return "Started (app)"
+        case 2: return "Started (button)"
+        case 3: return "Stopped (app)"
+        case 4: return "Stopped (button)"
+        case 5: return "Stopped (low battery)"
+        case 6: return "Stopped (memory full)"
+        case 7: return "Recovered (power loss)"
+        case 8: return "Download started"
+        case 9: return "Data erased"
+        default: return "Unknown (\(reason))"
+        }
+    }
+
+    var icon: String {
+        switch reason {
+        case 1, 2: return "record.circle"
+        case 3, 4: return "stop.circle"
+        case 5: return "battery.25"
+        case 6: return "externaldrive.badge.exclamationmark"
+        case 7: return "bolt.trianglebadge.exclamationmark"
+        case 8: return "arrow.down.circle"
+        case 9: return "trash"
+        default: return "questionmark.circle"
+        }
+    }
+}
+
 struct RunSession: Identifiable, Codable {
     let id: UUID
     let date: Date
@@ -15,7 +49,8 @@ struct RunSession: Identifiable, Codable {
     var sampleCount: Int
     var avgCadence: Int
     var totalSteps: Int?
-    var linkedWorkoutID: String?  // Apple Health workout UUID
+    var linkedWorkoutID: String?
+    var events: [DeviceEvent]?  // event log from device
     var samplesFileName: String
 
     private static let fmt: DateFormatter = {
@@ -54,20 +89,32 @@ class SessionStore: ObservableObject {
 
     /// Save a session downloaded from device flash. Returns true on success.
     @discardableResult
-    func saveDownloadedSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double) -> Bool {
+    func saveDownloadedSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double, startUnixMs: UInt64 = 0, events: [DeviceEvent]? = nil) -> Bool {
         guard !samples.isEmpty else { return false }
 
         let fileName = "samples_\(UUID().uuidString.prefix(8)).json"
         let analysis = RunMetrics.analyzeRecording(samples)
 
+        // Use wall-clock start time from device if available, otherwise approximate
+        let startDate: Date
+        let endDate: Date
+        if startUnixMs > 0 {
+            startDate = Date(timeIntervalSince1970: Double(startUnixMs) / 1000.0)
+            endDate = startDate.addingTimeInterval(durationSec)
+        } else {
+            startDate = Date().addingTimeInterval(-durationSec)
+            endDate = Date()
+        }
+
         let session = RunSession(
             id: UUID(),
-            date: Date().addingTimeInterval(-durationSec),
-            endDate: Date(),
+            date: startDate,
+            endDate: endDate,
             duration: durationSec,
             sampleCount: samples.count,
             avgCadence: Int(analysis.avgCadence),
             totalSteps: analysis.totalSteps,
+            events: events,
             samplesFileName: fileName
         )
 

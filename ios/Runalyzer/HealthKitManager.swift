@@ -220,11 +220,19 @@ class HealthKitManager: ObservableObject {
             group.leave()
         }
 
-        // Distance samples → track over time
+        // Distance samples → filter to single source (prefer Watch over iPhone)
         group.enter()
         fetchSamples(.distanceWalkingRunning, predicate: predicate) { samples in
-            var cumDist: Double = 0
+            // Group by source, pick the one with most samples (usually Watch during workout)
+            var bySource: [String: [HKQuantitySample]] = [:]
             for s in samples {
+                let name = s.sourceRevision.source.name
+                bySource[name, default: []].append(s)
+            }
+            let bestSource = bySource.max(by: { $0.value.count < $1.value.count })?.value ?? samples
+
+            var cumDist: Double = 0
+            for s in bestSource {
                 let d = s.quantity.doubleValue(for: .meter())
                 cumDist += d
                 result.distanceSamples.append(TimestampedValue(date: s.endDate, value: cumDist))

@@ -7,6 +7,13 @@ struct SettingsView: View {
     @State private var showEraseConfirm = false
     @State private var showClearHistoryConfirm = false
 
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .medium
+        return f
+    }()
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -106,6 +113,29 @@ struct SettingsView: View {
                                 .font(.subheadline.monospacedDigit())
                                 .foregroundColor(ble.deviceStatus.batteryPercent < 20 ? .red : .green)
                         }
+                    }
+
+                    infoRow(label: "Time Synced", value: ble.deviceStatus.isTimeSynced ? "Yes" : "No")
+                }
+
+                // Unsynced session on device
+                if ble.deviceStatus.sampleCount > 0 {
+                    Divider().background(Color.gray.opacity(0.3))
+                    VStack(spacing: 6) {
+                        HStack {
+                            Image(systemName: "internaldrive")
+                                .foregroundColor(.cyan)
+                            Text("Unsynced Session").font(.subheadline.bold())
+                            Spacer()
+                        }
+                        infoRow(label: "Samples", value: "\(ble.deviceStatus.sampleCount)")
+                        infoRow(label: "Duration", value: ble.deviceStatus.durationString)
+                        if let startDate = ble.deviceStatus.recordingStartDate {
+                            infoRow(label: "Started", value: Self.dateFmt.string(from: startDate))
+                        }
+                        let capPct2 = ble.deviceStatus.maxSamples > 0
+                            ? Float(ble.deviceStatus.sampleCount) / Float(ble.deviceStatus.maxSamples) * 100 : 0
+                        infoRow(label: "Flash Used", value: String(format: "%.1f%%", capPct2))
                     }
                 }
             } else {

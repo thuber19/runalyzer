@@ -82,19 +82,39 @@ The sensor exposes one GATT service with these characteristics:
 | `def1` | IMU Stream | Read, Notify | Live 16-byte packets: `[u32 timestamp, i16 ax,ay,az,gx,gy,gz]` |
 | `def2` | Control | Write | Commands: 1=start, 2=stop, 3=erase, 4=begin download, 5=next chunk |
 | `def3` | Status | Read, Notify | 20-byte device status (state, samples, rate, battery, capacity, duration) |
-| `def4` | Download | Read, Notify | Data chunks: `[u32 offset, N×16B samples]`, end marker: `[0xFF×4]` |
+| `def4` | Download | Read, Notify | Data chunks: `[u32 offset, N×12B samples]`, end marker: `[0xFF×4]` |
 | `def5` | Config | Read, Write | Sample rate in Hz (10-100) |
 
-Download uses a request-response protocol (command 5 requests each chunk) for reliable transfer.
+Download uses a request-response protocol (command 5 requests each chunk) for reliable transfer. Samples stored on flash are 12 bytes each (6 axes, no timestamp). Timestamps are reconstructed from the sample index and recording rate during download.
 
 ## Recording capacity
 
 | Sample rate | Max duration |
 |-------------|-------------|
-| 25 Hz | ~2.1 hours |
-| 50 Hz | ~1.1 hours |
-| 100 Hz | ~33 minutes |
+| 25 Hz | ~2.8 hours |
+| 50 Hz | ~1.4 hours |
+| 100 Hz | ~42 minutes |
 
-## Low battery
+## Data safety
 
-At 10% battery, the firmware stops recording, flushes all data to flash, and enters deep sleep. Data is preserved and will sync on next power-up.
+The firmware protects recordings against data loss in several ways:
+
+- **Periodic flush**: The RAM write buffer is flushed to flash every 10 seconds. If the battery dies unexpectedly, at most 10 seconds of data is lost.
+- **Low battery shutdown**: At 10% battery, the firmware gracefully stops recording, flushes all buffered data, writes the session header, and enters deep sleep. Data is preserved and will sync on next power-up.
+- **Memory full auto-stop**: At 95% flash capacity, recording stops automatically to avoid running out of space mid-write.
+- **Power-loss recovery**: If power is lost during recording, the `isRecording` flag in the flash header persists. On reboot, the firmware resumes accepting that the session ended at the last flush point. The data up to that point is available for download.
+
+## App state management
+
+The app tracks two independent pieces of state:
+
+- `connected` — whether BLE is physically connected right now (set by CoreBluetooth callbacks, always accurate)
+- `appState` — what the user is doing: `.disconnected`, `.idle`, `.recording`, `.stopping`, `.downloading`, or `.error`
+
+These are intentionally independent. The device can be recording while the phone is disconnected (`connected = false`, `appState = .recording`). When the phone reconnects, the app reads the device status and reconciles:
+
+- Device reports `recording` → app shows Stop button
+- Device reports `hasData` → app starts auto-download
+- Device reports `idle` → app shows Start button
+
+The app also monitors the device status continuously. If the device stops recording unexpectedly (battery died, memory full), the app detects the state change and starts downloading the saved data automatically.

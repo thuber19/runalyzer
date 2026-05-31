@@ -11,10 +11,14 @@ struct LiveDashboardView: View {
                 VStack(spacing: 16) {
                     connectionBanner
                     recordingControls
-                    if ble.connected {
+                    if ble.connected && ble.appState != .downloading {
                         metricsGrid
                         accelChart
                         gyroChart
+                    } else if ble.appState == .downloading {
+                        Text("Live preview paused during sync")
+                            .font(.caption).foregroundColor(.gray)
+                            .frame(maxWidth: .infinity).padding()
                     }
                 }
                 .padding()
@@ -54,14 +58,16 @@ struct LiveDashboardView: View {
     // MARK: - Recording Controls
     private var recordingControls: some View {
         VStack(spacing: 12) {
-            switch ble.appState {
-            case .disconnected:
+            if !ble.connected && ble.appState != .recording {
+                // Not connected and not recording on device
                 Label("Connect sensor to start", systemImage: "antenna.radiowaves.left.and.right")
                     .frame(maxWidth: .infinity).padding()
                     .foregroundColor(.gray)
                     .background(Color(hex: 0x16213e)).cornerRadius(12)
-
-            case .idle:
+            } else {
+            switch ble.appState {
+            case .disconnected, .idle:
+                let hasUnsyncedData = ble.deviceStatus.state == .hasData && ble.deviceStatus.sampleCount > 0
                 Button(action: {
                     metrics.reset()
                     ble.startRecording()
@@ -69,7 +75,14 @@ struct LiveDashboardView: View {
                     Label("Start Recording", systemImage: "record.circle")
                         .font(.headline)
                         .frame(maxWidth: .infinity).padding()
-                        .background(Color(hex: 0xe94560)).foregroundColor(.white).cornerRadius(12)
+                        .background(ble.connected && !hasUnsyncedData ? Color(hex: 0xe94560) : Color.gray)
+                        .foregroundColor(.white).cornerRadius(12)
+                }
+                .disabled(!ble.connected || hasUnsyncedData)
+
+                if hasUnsyncedData {
+                    Text("Previous session not synced yet. Waiting for download...")
+                        .font(.caption).foregroundColor(.orange).multilineTextAlignment(.center)
                 }
 
             case .recording:
@@ -116,6 +129,7 @@ struct LiveDashboardView: View {
                             .font(.subheadline.monospacedDigit()).foregroundColor(.cyan)
                     }
                     ProgressView(value: ble.downloadProgress).tint(.cyan)
+
                 }
                 .padding()
                 .background(Color.cyan.opacity(0.1)).cornerRadius(12)
@@ -128,6 +142,7 @@ struct LiveDashboardView: View {
                 .padding()
                 .background(Color.red.opacity(0.1)).cornerRadius(12)
             }
+            } // end else (connected)
         }
     }
 
