@@ -18,6 +18,7 @@ struct SettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    devicesSection
                     sampleRateSection
                     deviceInfoSection
                     dataManagementSection
@@ -31,6 +32,45 @@ struct SettingsView: View {
         .onAppear {
             selectedRate = Double(ble.deviceStatus.sampleRateHz)
         }
+    }
+
+    // MARK: - Devices
+    private var devicesSection: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("DEVICES").font(.caption2).foregroundColor(.gray)
+                Spacer()
+            }
+
+            NavigationLink(destination: DeviceListView()) {
+                HStack {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .foregroundColor(.cyan)
+                    Text("Manage Devices")
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundColor(.gray)
+                }
+                .padding()
+                .background(Color(hex: 0x1a1a2e))
+                .cornerRadius(10)
+            }
+
+            NavigationLink(destination: ScaleSettingsView()) {
+                HStack {
+                    Image(systemName: "scalemass")
+                        .foregroundColor(.green)
+                    Text("Body Profile")
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundColor(.gray)
+                }
+                .padding()
+                .background(Color(hex: 0x1a1a2e))
+                .cornerRadius(10)
+            }
+        }
+        .padding()
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
     }
 
     // MARK: - Sample Rate

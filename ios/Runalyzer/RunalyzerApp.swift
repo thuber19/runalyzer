@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 @main
 struct RunalyzerApp: App {
@@ -8,8 +9,9 @@ struct RunalyzerApp: App {
     @StateObject private var sessions = SessionStore()
     @StateObject private var healthKit = HealthKitManager()
 
-    // New architecture (available for new device types)
+    // New architecture
     @StateObject private var coordinator = DeviceCoordinator()
+    @StateObject private var measurementStore = MeasurementStore()
 
     var body: some Scene {
         WindowGroup {
@@ -19,6 +21,7 @@ struct RunalyzerApp: App {
                 .environmentObject(sessions)
                 .environmentObject(healthKit)
                 .environmentObject(coordinator)
+                .environmentObject(measurementStore)
                 .onAppear {
                     healthKit.requestAuthorization()
 
@@ -42,7 +45,24 @@ struct RunalyzerApp: App {
                             }
                         }
                     }
+
+                    // Watch for scale measurements via coordinator
+                    coordinator.$activeDrivers
+                        .compactMap { drivers in
+                            drivers.values.first(where: { $0 is QNScaleDriver }) as? QNScaleDriver
+                        }
+                        .flatMap { $0.events }
+                        .receive(on: DispatchQueue.main)
+                        .sink { [weak measurementStore] event in
+                            if case .measurementReady(let measurement) = event,
+                               let scaleMeasurement = measurement as? ScaleMeasurement {
+                                measurementStore?.save(scaleMeasurement)
+                            }
+                        }
+                        .store(in: &cancellables)
                 }
         }
     }
+
+    @State private var cancellables = Set<AnyCancellable>()
 }

@@ -2,92 +2,16 @@ import Foundation
 import CoreBluetooth
 import Combine
 
-// ===================== Data Types =====================
+// Uses types from IMUDataTypes.swift: IMUPacket, RecordedSample, etc.
+// Uses types defined here: DeviceState, DeviceStatus, AppState (legacy, will be removed)
 
-struct IMUPacket {
-    let timestamp: UInt32
-    let ax, ay, az: Int16
-    let gx, gy, gz: Int16
+// Legacy type aliases — BLEManager still uses these names
+typealias DeviceState = IMUDeviceState
+typealias DeviceStatus = IMUDeviceStatus
+typealias AppState = IMUAppState
+typealias DeviceEvent = IMUDeviceEvent
 
-    static let accelScale: Float = 2.0 / 32768.0
-    static let gyroScale: Float = 245.0 / 32768.0
-
-    var accelG: (x: Float, y: Float, z: Float) {
-        (Float(ax) * Self.accelScale, Float(ay) * Self.accelScale, Float(az) * Self.accelScale)
-    }
-    var gyroDPS: (x: Float, y: Float, z: Float) {
-        (Float(gx) * Self.gyroScale, Float(gy) * Self.gyroScale, Float(gz) * Self.gyroScale)
-    }
-    var accelMagnitude: Float {
-        let a = accelG
-        return sqrtf(a.x*a.x + a.y*a.y + a.z*a.z)
-    }
-    var gyroMagnitude: Float {
-        let g = gyroDPS
-        return sqrtf(g.x*g.x + g.y*g.y + g.z*g.z)
-    }
-}
-
-// What the firmware reports
-enum DeviceState: UInt8 {
-    case idle = 0, recording = 1, hasData = 2, downloading = 3
-}
-
-struct DeviceStatus {
-    var state: DeviceState = .idle
-    var sampleCount: UInt32 = 0
-    var sampleRateHz: UInt8 = 25
-    var batteryPercent: UInt8 = 0
-    var isCharging: Bool = false
-    var isTimeSynced: Bool = false
-    var maxSamples: UInt32 = 0
-    var recordingDurationSec: UInt32 = 0
-    var recordingStartUnixMs: UInt64 = 0
-    var protocolVersion: UInt8 = 0
-    var headerVersion: UInt8 = 0
-
-    static let expectedProtocolVersion: UInt8 = 1
-
-    var recordingStartDate: Date? {
-        recordingStartUnixMs > 0 ? Date(timeIntervalSince1970: Double(recordingStartUnixMs) / 1000.0) : nil
-    }
-
-    var durationString: String {
-        let m = recordingDurationSec / 60
-        let s = recordingDurationSec % 60
-        return String(format: "%d:%02d", m, s)
-    }
-    var maxDurationAtRate: String {
-        guard sampleRateHz > 0, maxSamples > 0 else { return "--" }
-        let sec = maxSamples / UInt32(sampleRateHz)
-        let h = sec / 3600; let m = (sec % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
-}
-
-// App's own state — single source of truth for UI
-enum AppState: Equatable {
-    case disconnected
-    case idle
-    case recording
-    case stopping       // sent stop, waiting for hasData
-    case downloading    // syncing data from device
-    case error(String)
-
-    static func == (lhs: AppState, rhs: AppState) -> Bool {
-        switch (lhs, rhs) {
-        case (.disconnected, .disconnected),
-             (.idle, .idle),
-             (.recording, .recording),
-             (.stopping, .stopping),
-             (.downloading, .downloading): return true
-        case (.error(let a), .error(let b)): return a == b
-        default: return false
-        }
-    }
-}
-
-// ===================== BLE Manager =====================
+// ===================== BLE Manager (Legacy — will be replaced by DeviceCoordinator) =====================
 
 class BLEManager: NSObject, ObservableObject {
     // UUIDs

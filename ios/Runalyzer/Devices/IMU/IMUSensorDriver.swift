@@ -9,7 +9,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     // MARK: - DeviceDriver conformance
 
     let descriptor: DeviceDescriptor = IMUSensorDescriptor.descriptor
-    let id: UUID
+    nonisolated let id: UUID
     var displayName: String
     @Published var connectionState: DeviceConnectionState = .disconnected
     let peripheral: CBPeripheral
@@ -295,8 +295,6 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     }
 
     private func reconcileState() {
-        let wasRecording = UserDefaults.standard.bool(forKey: wasRecordingKey)
-
         switch deviceStatus.state {
         case .recording:
             appState = .recording

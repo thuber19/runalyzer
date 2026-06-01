@@ -82,6 +82,7 @@ enum IMUDeviceState: UInt8 {
 }
 
 struct IMUDeviceStatus {
+    static let expectedProtocolVersion: UInt8 = 1
     var state: IMUDeviceState = .idle
     var sampleCount: UInt32 = 0
     var sampleRateHz: UInt8 = 25

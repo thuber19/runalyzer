@@ -13,6 +13,11 @@ struct ContentView: View {
                     Label("History", systemImage: "clock.arrow.circlepath")
                 }
 
+            ScaleDashboardView()
+                .tabItem {
+                    Label("Body", systemImage: "scalemass")
+                }
+
             HealthView()
                 .tabItem {
                     Label("Health", systemImage: "heart.fill")

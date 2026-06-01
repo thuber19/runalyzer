@@ -9,7 +9,7 @@ class DeviceCoordinator: NSObject, ObservableObject {
     // All registered device types — add new descriptors here
     static let registeredDevices: [DeviceDescriptor] = [
         IMUSensorDescriptor.descriptor,
-        // Future: QNScaleDescriptor.descriptor,
+        QNScaleDescriptor.descriptor,
     ]
 
     // Published state

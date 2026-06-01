@@ -1,10 +1,15 @@
 # Runalyzer
 
-A wearable IMU sensor for running gait analysis. Records 6-axis motion data (accelerometer + gyroscope) at the hip/tailbone and analyzes cadence, impact force, vertical bounce, and left/right asymmetry.
+A personal health device hub that connects to BLE sensors and visualizes health data. Currently supports:
 
-The system has two parts: a small sensor board that clips to your waistband and records data to onboard flash, and an iOS app that syncs the recordings over Bluetooth and visualizes the results.
+- **IMU Gait Sensor** — 6-axis motion data for running analysis (cadence, impact, left/right asymmetry)
+- **QN Body Fat Scale** — weight + bioimpedance for body composition (fat %, muscle mass, BMI, BMR)
 
-## Hardware
+The app is designed for multiple device types — adding new BLE sensors requires only a driver + descriptor, no changes to existing code.
+
+## Supported Devices
+
+### IMU Gait Sensor (Seeed XIAO nRF52840 Sense)
 
 - **Seeed XIAO nRF52840 Sense** — the main board (nRF52840 SoC, BLE, 2MB QSPI flash)
 - **LSM6DS3TR-C** — onboard 6-axis IMU (accelerometer ±2g, gyroscope ±245 dps)
@@ -13,7 +18,33 @@ The system has two parts: a small sensor board that clips to your waistband and 
 
 No extra wiring or soldering needed. Everything is on the XIAO Sense board.
 
+### QN Body Fat Scale
+
+Any QN-protocol BLE scale (sold under Renpho, Etekcity, and other brands). The app connects via the FFF0 service, runs the vendor handshake, and reads weight + bioimpedance. Body composition is calculated using published BIA equations (Sun et al., Janssen et al., Mifflin-St Jeor).
+
+## Architecture
+
+The app uses a multi-device BLE architecture:
+
+```
+DeviceCoordinator (single CBCentralManager)
+├── IMUSensorDriver (gait sensor protocol)
+├── QNScaleDriver (body fat scale protocol)
+└── (future drivers)
+
+DeviceRegistry (persisted paired devices)
+MeasurementStore (unified storage for all device types)
+SessionStore (IMU sessions, backward compatible)
+```
+
+Adding a new device type requires only:
+1. Create a `DeviceDriver` conforming class
+2. Create a `DeviceDescriptor`
+3. Register it in `DeviceCoordinator.registeredDevices`
+
 ## How it works
+
+### IMU Gait Sensor
 
 1. Start a recording from the iOS app (or the sensor records independently if disconnected)
 2. All IMU samples are stored to the onboard 2MB flash at a configurable rate (10-100 Hz, default 25 Hz)

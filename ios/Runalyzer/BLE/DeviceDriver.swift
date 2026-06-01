@@ -27,12 +27,12 @@ enum DriverEvent {
 
 /// The protocol every device driver must conform to.
 /// One instance per connected peripheral.
-protocol DeviceDriver: AnyObject, ObservableObject, Identifiable where ID == UUID {
+protocol DeviceDriver: AnyObject, ObservableObject {
     /// The descriptor that created this driver.
     var descriptor: DeviceDescriptor { get }
 
     /// Unique ID (matches peripheral.identifier).
-    var id: UUID { get }
+    nonisolated var id: UUID { get }
 
     /// User-visible name.
     var displayName: String { get set }

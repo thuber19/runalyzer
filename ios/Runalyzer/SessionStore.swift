@@ -1,51 +1,7 @@
 import Foundation
 import Combine
 
-struct RecordedSample: Codable {
-    let timestamp: UInt32
-    let ax, ay, az: Int16
-    let gx, gy, gz: Int16
-}
-
-struct DeviceEvent: Codable, Identifiable {
-    let reason: UInt8
-    let offsetMs: UInt32  // H7: always relative ms from recording start
-
-    // H6: derive id from content, not random — stable across decodes
-    var id: String { "\(reason)-\(offsetMs)" }
-
-    private enum CodingKeys: String, CodingKey {
-        case reason, offsetMs
-    }
-
-    var reasonString: String {
-        switch reason {
-        case 1: return "Started (app)"
-        case 2: return "Started (button)"
-        case 3: return "Stopped (app)"
-        case 4: return "Stopped (button)"
-        case 5: return "Stopped (low battery)"
-        case 6: return "Stopped (memory full)"
-        case 7: return "Recovered (power loss)"
-        case 8: return "Download started"
-        case 9: return "Data erased"
-        default: return "Unknown (\(reason))"
-        }
-    }
-
-    var icon: String {
-        switch reason {
-        case 1, 2: return "record.circle"
-        case 3, 4: return "stop.circle"
-        case 5: return "battery.25"
-        case 6: return "externaldrive.badge.exclamationmark"
-        case 7: return "bolt.trianglebadge.exclamationmark"
-        case 8: return "arrow.down.circle"
-        case 9: return "trash"
-        default: return "questionmark.circle"
-        }
-    }
-}
+// RecordedSample, IMUDeviceEvent (DeviceEvent) are defined in IMUDataTypes.swift
 
 struct RunSession: Identifiable, Codable {
     let id: UUID
@@ -56,7 +12,7 @@ struct RunSession: Identifiable, Codable {
     var avgCadence: Int
     var totalSteps: Int?
     var linkedWorkoutID: String?
-    var events: [DeviceEvent]?  // event log from device
+    var events: [IMUDeviceEvent]?  // event log from device
     var samplesFileName: String
 
     private static let fmt: DateFormatter = {
@@ -95,7 +51,7 @@ class SessionStore: ObservableObject {
 
     /// Save a session downloaded from device flash. Completion called with success flag.
     /// M2: Heavy work (analysis, encoding) done on background queue.
-    func saveDownloadedSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double, startUnixMs: UInt64 = 0, events: [DeviceEvent]? = nil, completion: @escaping (Bool) -> Void) {
+    func saveDownloadedSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double, startUnixMs: UInt64 = 0, events: [IMUDeviceEvent]? = nil, completion: @escaping (Bool) -> Void) {
         guard !samples.isEmpty else { completion(false); return }
 
         // H8: Check for duplicate
@@ -112,7 +68,6 @@ class SessionStore: ObservableObject {
         }
 
         let dir = storageDir
-        let sessionsFile = sessionsURL
         let fileName = "samples_\(UUID().uuidString.prefix(8)).json"
 
         DispatchQueue.global(qos: .userInitiated).async {

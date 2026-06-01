@@ -2,8 +2,8 @@ import Foundation
 
 /// Protocol for any measurement type from any device.
 /// Provides enough info for unified listing and storage.
-protocol MeasurementData: Codable, Identifiable where ID == UUID {
-    var id: UUID { get }
+protocol MeasurementData: Codable, Identifiable {
+    nonisolated var id: UUID { get }
     var date: Date { get }
     var deviceType: String { get }      // matches DeviceDescriptor.id
     var deviceName: String { get }      // user-visible device name at time of capture

@@ -20,103 +20,114 @@ struct InteractiveLineChart: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(title.uppercased()).font(.caption2).foregroundColor(.gray)
-                Spacer()
-                if let sel = selectedX, let info = valueAt(sel) {
-                    Text(info).font(.caption2.monospacedDigit()).foregroundColor(.white)
-                }
-                if zoomRange != nil {
-                    Button(action: { withAnimation { zoomRange = nil } }) {
-                        Text("Reset").font(.caption2).foregroundColor(.cyan)
-                    }
-                }
-            }
-
-            // Legend
-            if series.count > 1 {
-                HStack(spacing: 12) {
-                    ForEach(series) { s in
-                        HStack(spacing: 4) {
-                            Circle().fill(s.color).frame(width: 6, height: 6)
-                            Text(s.name).font(.system(size: 10)).foregroundColor(.gray)
-                        }
-                    }
-                }
-            }
-
-            Chart {
-                ForEach(series) { s in
-                    let visibleData = filteredData(s.data)
-                    ForEach(visibleData) { point in
-                        LineMark(
-                            x: .value("Time", point.date),
-                            y: .value(s.name, point.value)
-                        )
-                        .foregroundStyle(s.color)
-                        .lineStyle(StrokeStyle(lineWidth: s.lineWidth))
-                    }
-                }
-
-                if let sel = selectedX {
-                    RuleMark(x: .value("Selected", sel))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                }
-            }
-            .chartYScale(domain: yDomain ?? autoYDomain)
-            .chartXScale(domain: xDomain)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 4)) { value in
-                    AxisValueLabel {
-                        if let date = value.as(Date.self) {
-                            Text(Self.timeFmt.string(from: date))
-                                .font(.system(size: 9))
-                        }
-                    }
-                    AxisGridLine()
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
-                    AxisValueLabel {
-                        if let v = value.as(Double.self) {
-                            Text(String(format: "%.1f", v)).font(.system(size: 9))
-                        }
-                    }
-                    AxisGridLine()
-                }
-            }
-            .chartOverlay { proxy in
-                GeometryReader { geo in
-                    Rectangle()
-                        .fill(Color.clear)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { drag in
-                                    let x = drag.location.x - geo[proxy.plotAreaFrame].origin.x
-                                    if let date: Date = proxy.value(atX: x) {
-                                        selectedX = date
-                                    }
-                                }
-                                .onEnded { _ in
-                                    // Keep selection visible
-                                }
-                        )
-                        .gesture(
-                            MagnificationGesture()
-                                .onEnded { scale in
-                                    zoom(by: scale)
-                                }
-                        )
-                }
-            }
-            .frame(height: height)
+            headerView
+            legendView
+            chartView
         }
         .padding()
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
+    }
+
+    // MARK: - Subviews
+
+    private var headerView: some View {
+        HStack {
+            Text(title.uppercased()).font(.caption2).foregroundColor(.gray)
+            Spacer()
+            if let sel = selectedX, let info = valueAt(sel) {
+                Text(info).font(.caption2.monospacedDigit()).foregroundColor(.white)
+            }
+            if zoomRange != nil {
+                Button(action: { withAnimation { zoomRange = nil } }) {
+                    Text("Reset").font(.caption2).foregroundColor(.cyan)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var legendView: some View {
+        if series.count > 1 {
+            HStack(spacing: 12) {
+                ForEach(series) { s in
+                    HStack(spacing: 4) {
+                        Circle().fill(s.color).frame(width: 6, height: 6)
+                        Text(s.name).font(.system(size: 10)).foregroundColor(.gray)
+                    }
+                }
+            }
+        }
+    }
+
+    private var chartView: some View {
+        chartContent
+            .chartYScale(domain: yDomain ?? autoYDomain)
+            .chartXScale(domain: xDomain)
+            .chartXAxis { xAxisMarks }
+            .chartYAxis { yAxisMarks }
+            .chartOverlay { proxy in chartOverlay(proxy: proxy) }
+            .frame(height: height)
+    }
+
+    private var chartContent: Chart<some ChartContent> {
+        Chart {
+            ForEach(series) { s in
+                ForEach(filteredData(s.data)) { point in
+                    LineMark(
+                        x: .value("Time", point.date),
+                        y: .value(s.name, point.value)
+                    )
+                    .foregroundStyle(s.color)
+                    .lineStyle(StrokeStyle(lineWidth: s.lineWidth))
+                }
+            }
+            if let sel = selectedX {
+                RuleMark(x: .value("Selected", sel))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+            }
+        }
+    }
+
+    private var xAxisMarks: some AxisContent {
+        AxisMarks(values: .automatic(desiredCount: 4)) { value in
+            AxisValueLabel {
+                if let date = value.as(Date.self) {
+                    Text(Self.timeFmt.string(from: date)).font(.system(size: 9))
+                }
+            }
+            AxisGridLine()
+        }
+    }
+
+    private var yAxisMarks: some AxisContent {
+        AxisMarks(position: .leading, values: .automatic(desiredCount: 4)) { value in
+            AxisValueLabel {
+                if let v = value.as(Double.self) {
+                    Text(String(format: "%.1f", v)).font(.system(size: 9))
+                }
+            }
+            AxisGridLine()
+        }
+    }
+
+    private func chartOverlay(proxy: ChartProxy) -> some View {
+        GeometryReader { geo in
+            Rectangle()
+                .fill(Color.clear)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { drag in
+                            guard let plotFrame = proxy.plotFrame else { return }
+                            let x = drag.location.x - geo[plotFrame].origin.x
+                            if let date: Date = proxy.value(atX: x) {
+                                selectedX = date
+                            }
+                        }
+                )
+        }
     }
 
     // MARK: - Helpers
