@@ -140,26 +140,50 @@ struct SessionDetailView: View {
                         .padding()
                 }
 
-                // Comparison
+                // Comparison table (IMU vs Apple Health in 10s intervals)
+                ComparisonTableView.build(
+                    session: session,
+                    analysis: analysis,
+                    samples: samples,
+                    appleData: appleData
+                )
+
+                // Apple Health comparison cards
                 if let data = appleData {
                     comparisonView(data)
-                    if !data.cadenceSamples.isEmpty {
-                        cadenceChart(data)
-                    }
+
+                    // Heart rate chart (standalone, always useful)
                     if !data.heartRateSamples.isEmpty {
-                        heartRateChart(data)
+                        InteractiveLineChart(
+                            title: "Heart Rate",
+                            series: [.fromTimestamped(data.heartRateSamples, name: "BPM", color: .red)],
+                            yDomain: 40...200
+                        )
                     }
+
+                    // Distance
                     if !data.distanceSamples.isEmpty {
-                        distanceChart(data)
-                    }
-                    if !data.heartRateSamples.isEmpty && !samples.isEmpty {
-                        timelineChart(data)
+                        InteractiveLineChart(
+                            title: "Cumulative Distance (m)",
+                            series: [.fromTimestamped(data.distanceSamples, name: "Distance", color: .green)]
+                        )
                     }
                 }
 
-                // Accel replay
+                // Acceleration magnitude
                 if !samples.isEmpty {
-                    replayChart
+                    let accelSeries = ChartSeries.fromIMUSamples(samples, sessionStart: session.date,
+                        name: "Accel (g)", color: Color(hex: 0x4ecca3)) { s in
+                        let ax = Float(s.ax) * IMUPacket.accelScale
+                        let ay = Float(s.ay) * IMUPacket.accelScale
+                        let az = Float(s.az) * IMUPacket.accelScale
+                        return Double(sqrtf(ax*ax + ay*ay + az*az))
+                    }
+                    InteractiveLineChart(
+                        title: "Acceleration Magnitude",
+                        series: [accelSeries],
+                        yDomain: 0...4
+                    )
                 }
 
                 // Export
@@ -494,40 +518,43 @@ struct SessionDetailView: View {
     // MARK: - Comparison
     private func comparisonView(_ data: AppleRunData) -> some View {
         VStack(spacing: 12) {
-            Text("APPLE HEALTH vs IMU SENSOR").font(.caption2).foregroundColor(.gray)
+            Text("APPLE HEALTH WORKOUT").font(.caption2).foregroundColor(.gray)
 
-            HStack(spacing: 0) {
-                comparisonCard(title: "IMU Cadence", value: "\(session.avgCadence)", unit: "spm", color: Color(hex: 0xe94560))
-                Image(systemName: "arrow.left.arrow.right").foregroundColor(.gray).padding(.horizontal, 8)
-                comparisonCard(title: "Apple Cadence", value: String(format: "%.0f", data.avgCadence), unit: "spm", color: .pink)
-            }
-
-            if session.avgCadence > 0 && data.avgCadence > 0 {
-                let diff = abs(Double(session.avgCadence) - data.avgCadence)
-                let pctDiff = diff / data.avgCadence * 100
-                HStack {
-                    Image(systemName: pctDiff < 5 ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                        .foregroundColor(pctDiff < 5 ? .green : (pctDiff < 15 ? .yellow : .red))
-                    Text(pctDiff < 5 ? "Cadence matches (±\(String(format: "%.1f", pctDiff))%)" :
-                         "Cadence differs by \(String(format: "%.1f", pctDiff))%")
-                        .font(.caption).foregroundColor(.gray)
-                }
-            }
-
-            Divider().background(Color.gray.opacity(0.3))
-
+            // Global stats
             HStack(spacing: 16) {
                 if data.avgHeartRate > 0 {
                     statBadge(icon: "heart.fill", color: .red, value: String(format: "%.0f", data.avgHeartRate), unit: "bpm")
                 }
-                if data.distanceKm > 0 {
-                    statBadge(icon: "figure.run", color: .green, value: String(format: "%.2f", data.distanceKm), unit: "km")
-                }
-                if data.totalSteps > 0 {
-                    statBadge(icon: "shoeprints.fill", color: .blue, value: "\(data.totalSteps)", unit: "steps")
-                }
                 if data.activeCalories > 0 {
                     statBadge(icon: "flame.fill", color: .orange, value: String(format: "%.0f", data.activeCalories), unit: "kcal")
+                }
+            }
+
+            // Per-source breakdown
+            if !data.sources.isEmpty {
+                Divider().background(Color.gray.opacity(0.3))
+                Text("DATA SOURCES").font(.system(size: 9)).foregroundColor(.gray)
+
+                ForEach(data.sources) { source in
+                    HStack {
+                        Text(source.sourceName)
+                            .font(.caption).foregroundColor(.cyan)
+                            .lineLimit(1)
+                        Spacer()
+                        if source.totalSteps > 0 {
+                            VStack(alignment: .trailing) {
+                                Text("\(source.totalSteps) steps").font(.caption2.monospacedDigit())
+                                Text(String(format: "%.0f spm", source.avgCadence))
+                                    .font(.system(size: 9).monospacedDigit()).foregroundColor(.gray)
+                            }
+                        }
+                        if source.distanceKm > 0 {
+                            Text(String(format: "%.2f km", source.distanceKm))
+                                .font(.caption2.monospacedDigit()).foregroundColor(.green)
+                                .padding(.leading, 8)
+                        }
+                    }
+                    .padding(.vertical, 2)
                 }
             }
         }
@@ -535,15 +562,6 @@ struct SessionDetailView: View {
         .frame(maxWidth: .infinity)
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
-    }
-
-    private func comparisonCard(title: String, value: String, unit: String, color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text(title).font(.caption2).foregroundColor(.gray)
-            Text(value).font(.title.bold().monospacedDigit()).foregroundColor(color)
-            Text(unit).font(.caption2).foregroundColor(.gray)
-        }
-        .frame(maxWidth: .infinity)
     }
 
     private func statBadge(icon: String, color: Color, value: String, unit: String) -> some View {
@@ -554,156 +572,7 @@ struct SessionDetailView: View {
         }
     }
 
-    // MARK: - Cadence Chart (from Apple step data)
-    private func cadenceChart(_ data: AppleRunData) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("APPLE CADENCE (steps/min)").font(.caption2).foregroundColor(.gray)
-            Chart(data.cadenceSamples) { sample in
-                BarMark(x: .value("Time", sample.date), y: .value("SPM", sample.value))
-                    .foregroundStyle(Color.pink)
-            }
-            .chartYAxis { AxisMarks(position: .leading) }
-            .frame(height: 120)
-        }
-        .padding()
-        .background(Color(hex: 0x16213e))
-        .cornerRadius(12)
-    }
 
-    // MARK: - Distance Chart
-    private func distanceChart(_ data: AppleRunData) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("CUMULATIVE DISTANCE (m)").font(.caption2).foregroundColor(.gray)
-            Chart(data.distanceSamples) { sample in
-                LineMark(x: .value("Time", sample.date), y: .value("m", sample.value))
-                    .foregroundStyle(.green)
-            }
-            .chartYAxis { AxisMarks(position: .leading) }
-            .frame(height: 120)
-        }
-        .padding()
-        .background(Color(hex: 0x16213e))
-        .cornerRadius(12)
-    }
-
-    // MARK: - Heart Rate Chart
-    private func heartRateChart(_ data: AppleRunData) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("HEART RATE").font(.caption2).foregroundColor(.gray)
-            Chart(data.heartRateSamples) { sample in
-                LineMark(x: .value("Time", sample.date), y: .value("BPM", sample.value))
-                    .foregroundStyle(.red)
-            }
-            .chartYAxis { AxisMarks(position: .leading) }
-            .frame(height: 120)
-        }
-        .padding()
-        .background(Color(hex: 0x16213e))
-        .cornerRadius(12)
-    }
-
-    // MARK: - Timeline: Accel + HR overlaid
-    private func timelineChart(_ data: AppleRunData) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("TIMELINE: IMPACT vs HEART RATE").font(.caption2).foregroundColor(.gray)
-            Text("Green = accel magnitude, Red = heart rate")
-                .font(.system(size: 9)).foregroundColor(.gray.opacity(0.6))
-
-            Canvas { context, size in
-                let w = size.width
-                let h = size.height
-                guard !samples.isEmpty, !data.heartRateSamples.isEmpty else { return }
-
-                // Find the common time range across both datasets
-                let imuStart = session.date  // wall-clock start (synced from device)
-                let imuEnd = imuStart.addingTimeInterval(Double(samples.last!.timestamp - samples[0].timestamp) / 1000.0)
-                guard let hrStart = data.heartRateSamples.first?.date,
-                      let hrEnd = data.heartRateSamples.last?.date else { return }
-
-                // Absolute time range covering both datasets
-                let rangeStart = min(imuStart, hrStart)
-                let rangeEnd = max(imuEnd, hrEnd)
-                let totalDuration = rangeEnd.timeIntervalSince(rangeStart)
-                guard totalDuration > 0 else { return }
-
-                func xFor(_ date: Date) -> CGFloat {
-                    CGFloat(date.timeIntervalSince(rangeStart) / totalDuration) * w
-                }
-                func xForIMU(_ sample: RecordedSample) -> CGFloat {
-                    let elapsed = Double(sample.timestamp - samples[0].timestamp) / 1000.0
-                    let date = imuStart.addingTimeInterval(elapsed)
-                    return xFor(date)
-                }
-
-                // Accel magnitude (downsample to ~1 per pixel)
-                let step = max(1, samples.count / Int(w))
-                var accelPath = Path()
-                for i in stride(from: 0, to: samples.count, by: step) {
-                    let s = samples[i]
-                    let ax = Float(s.ax) * IMUPacket.accelScale
-                    let ay = Float(s.ay) * IMUPacket.accelScale
-                    let az = Float(s.az) * IMUPacket.accelScale
-                    let mag = Double(sqrtf(ax*ax + ay*ay + az*az))
-                    let x = xForIMU(s)
-                    let y = h - CGFloat(mag / 3.0) * h
-                    if i == 0 { accelPath.move(to: CGPoint(x: x, y: y)) }
-                    else { accelPath.addLine(to: CGPoint(x: x, y: y)) }
-                }
-                context.stroke(accelPath, with: .color(Color(hex: 0x4ecca3).opacity(0.7)), lineWidth: 1)
-
-                // Heart rate (60-200 mapped to full height)
-                var hrPath = Path()
-                for (i, p) in data.heartRateSamples.enumerated() {
-                    let x = xFor(p.date)
-                    let y = h - CGFloat((p.value - 60) / 140) * h
-                    if i == 0 { hrPath.move(to: CGPoint(x: x, y: y)) }
-                    else { hrPath.addLine(to: CGPoint(x: x, y: y)) }
-                }
-                context.stroke(hrPath, with: .color(.red.opacity(0.8)), lineWidth: 1.5)
-            }
-            .frame(height: 150)
-        }
-        .padding()
-        .background(Color(hex: 0x16213e))
-        .cornerRadius(12)
-    }
-
-    // MARK: - Accel Replay
-    private var replayChart: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("ACCELERATION MAGNITUDE").font(.caption2).foregroundColor(.gray)
-            let mags: [(Int, Float)] = samples.enumerated().map { i, s in
-                let ax = Float(s.ax) * IMUPacket.accelScale
-                let ay = Float(s.ay) * IMUPacket.accelScale
-                let az = Float(s.az) * IMUPacket.accelScale
-                return (i, sqrtf(ax*ax + ay*ay + az*az))
-            }
-            let step = max(1, mags.count / 500)
-            let downsampled = stride(from: 0, to: mags.count, by: step).map { mags[$0] }
-
-            Canvas { context, size in
-                let w = size.width; let h = size.height
-                let count = CGFloat(downsampled.count)
-                let baseY = h - (1.0 / 3.0) * h
-                var basePath = Path()
-                basePath.move(to: CGPoint(x: 0, y: baseY))
-                basePath.addLine(to: CGPoint(x: w, y: baseY))
-                context.stroke(basePath, with: .color(.gray.opacity(0.3)), style: StrokeStyle(dash: [4, 4]))
-                var path = Path()
-                for (idx, (_, val)) in downsampled.enumerated() {
-                    let x = CGFloat(idx) / count * w
-                    let y = h - (CGFloat(val) / 3.0) * h
-                    if idx == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                    else { path.addLine(to: CGPoint(x: x, y: y)) }
-                }
-                context.stroke(path, with: .color(Color(hex: 0x4ecca3)), lineWidth: 1)
-            }
-            .frame(height: 150)
-        }
-        .padding()
-        .background(Color(hex: 0x16213e))
-        .cornerRadius(12)
-    }
 }
 
 // MARK: - Workout Picker

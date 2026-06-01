@@ -262,10 +262,31 @@ class RunMetrics: ObservableObject {
         let filteredTimeline = zip(timestamps, filtered).map { (timestamp: $0, value: $1) }
         let gyroTimeline = zip(timestamps, filteredGyro).map { (timestamp: $0, value: $1) }
 
+        // Calculate cadence in 10-second windows
+        let windowMs: UInt32 = 10000
+        var cadenceWindows: [CadenceWindow] = []
+        if let firstTs = timestamps.first, let lastTs = timestamps.last, lastTs > firstTs {
+            var windowStart = firstTs
+            while windowStart < lastTs {
+                let windowEnd = windowStart + windowMs
+                let stepsInWindow = detectedSteps.filter { $0.timestamp >= windowStart && $0.timestamp < windowEnd }
+                let durationMin = Float(min(windowEnd, lastTs) - windowStart) / 60000.0
+                let cadence = durationMin > 0 ? Float(stepsInWindow.count) / durationMin : 0
+                cadenceWindows.append(CadenceWindow(
+                    startMs: windowStart - firstTs,
+                    endMs: min(windowEnd, lastTs) - firstTs,
+                    cadence: cadence,
+                    stepCount: stepsInWindow.count
+                ))
+                windowStart = windowEnd
+            }
+        }
+
         return RecordingAnalysis(
             totalSteps: detectedSteps.count,
             avgCadence: avgCadence,
             steps: detectedSteps,
+            cadenceWindows: cadenceWindows,
             accelMag: accelMag,
             filtered: filteredTimeline,
             gyroFiltered: gyroTimeline,
@@ -291,10 +312,19 @@ struct DetectedStep {
     let side: StepSide
 }
 
+// Cadence measured over a time window
+struct CadenceWindow {
+    let startMs: UInt32      // relative ms from recording start
+    let endMs: UInt32
+    let cadence: Float       // steps per minute in this window
+    let stepCount: Int
+}
+
 struct RecordingAnalysis {
     let totalSteps: Int
     let avgCadence: Float
     let steps: [DetectedStep]
+    let cadenceWindows: [CadenceWindow]  // cadence over time in intervals
     let accelMag: [(timestamp: UInt32, value: Float)]
     let filtered: [(timestamp: UInt32, value: Float)]
     let gyroFiltered: [(timestamp: UInt32, value: Float)]
@@ -302,7 +332,7 @@ struct RecordingAnalysis {
     let dominantGyroAxis: String
 
     static let empty = RecordingAnalysis(
-        totalSteps: 0, avgCadence: 0, steps: [],
+        totalSteps: 0, avgCadence: 0, steps: [], cadenceWindows: [],
         accelMag: [], filtered: [], gyroFiltered: [],
         dynamicThreshold: 0, dominantGyroAxis: ""
     )

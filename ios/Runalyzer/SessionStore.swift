@@ -49,7 +49,7 @@ struct DeviceEvent: Codable, Identifiable {
 
 struct RunSession: Identifiable, Codable {
     let id: UUID
-    let date: Date
+    var date: Date
     var endDate: Date?
     var duration: TimeInterval
     var sampleCount: Int
@@ -186,6 +186,7 @@ class SessionStore: ObservableObject {
               let samples = try? JSONDecoder().decode([RecordedSample].self, from: data) else { return [] }
         return samples
     }
+
 
     func deleteSession(_ session: RunSession) {
         try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(session.samplesFileName))

@@ -52,15 +52,30 @@ struct TimestampedValue: Identifiable {
     let value: Double
 }
 
+struct SourceData: Identifiable {
+    let id = UUID()
+    let sourceName: String
+    var totalSteps: Int = 0
+    var avgCadence: Double = 0
+    var cadenceSamples: [TimestampedValue] = []
+    var distanceMeters: Double = 0
+    var distanceSamples: [TimestampedValue] = []
+    var distanceKm: Double { distanceMeters / 1000 }
+}
+
 struct AppleRunData {
     var heartRateSamples: [TimestampedValue] = []
     var avgHeartRate: Double = 0
-    var totalSteps: Int = 0
-    var avgCadence: Double = 0
-    var cadenceSamples: [TimestampedValue] = [] // cadence over time
-    var distanceSamples: [TimestampedValue] = [] // cumulative distance over time
-    var distanceMeters: Double = 0
     var activeCalories: Double = 0
+    var sources: [SourceData] = []  // per-source step/distance data
+
+    // Convenience: primary source (most samples)
+    var primarySource: SourceData? { sources.max(by: { $0.cadenceSamples.count < $1.cadenceSamples.count }) }
+    var totalSteps: Int { sources.map(\.totalSteps).max() ?? 0 }
+    var avgCadence: Double { primarySource?.avgCadence ?? 0 }
+    var cadenceSamples: [TimestampedValue] { primarySource?.cadenceSamples ?? [] }
+    var distanceMeters: Double { sources.map(\.distanceMeters).max() ?? 0 }
+    var distanceSamples: [TimestampedValue] { primarySource?.distanceSamples ?? [] }
     var distanceKm: Double { distanceMeters / 1000 }
 }
 
@@ -209,42 +224,58 @@ class HealthKitManager: ObservableObject {
 
         // Step count samples → calculate cadence per interval
         group.enter()
-        fetchSamples(.stepCount, predicate: predicate) { samples in
-            var totalSteps: Double = 0
-            for s in samples {
-                let steps = s.quantity.doubleValue(for: .count())
-                let duration = s.endDate.timeIntervalSince(s.startDate)
-                totalSteps += steps
-                if duration > 0 {
-                    let cadence = (steps / duration) * 60 // steps per minute
-                    let midDate = s.startDate.addingTimeInterval(duration / 2)
-                    result.cadenceSamples.append(TimestampedValue(date: midDate, value: cadence))
+        fetchSamples(.stepCount, predicate: predicate) { stepSamples in
+            // Group steps by source
+            var stepsBySource: [String: [HKQuantitySample]] = [:]
+            for s in stepSamples { stepsBySource[s.sourceRevision.source.name, default: []].append(s) }
+
+            let totalDuration = endDate.timeIntervalSince(startDate) / 60
+
+            for (sourceName, samples) in stepsBySource {
+                var sd = result.sources.first(where: { $0.sourceName == sourceName }) ?? SourceData(sourceName: sourceName)
+                var total: Double = 0
+                for s in samples {
+                    let steps = s.quantity.doubleValue(for: .count())
+                    let dur = s.endDate.timeIntervalSince(s.startDate)
+                    total += steps
+                    if dur > 0 {
+                        sd.cadenceSamples.append(TimestampedValue(
+                            date: s.startDate.addingTimeInterval(dur / 2),
+                            value: (steps / dur) * 60
+                        ))
+                    }
+                }
+                sd.totalSteps = Int(total)
+                sd.avgCadence = totalDuration > 0 ? total / totalDuration : 0
+                if let idx = result.sources.firstIndex(where: { $0.sourceName == sourceName }) {
+                    result.sources[idx] = sd
+                } else {
+                    result.sources.append(sd)
                 }
             }
-            result.totalSteps = Int(totalSteps)
-            let totalDuration = endDate.timeIntervalSince(startDate) / 60
-            result.avgCadence = totalDuration > 0 ? totalSteps / totalDuration : 0
             group.leave()
         }
 
-        // Distance samples → filter to single source (prefer Watch over iPhone)
+        // Distance samples → per source
         group.enter()
-        fetchSamples(.distanceWalkingRunning, predicate: predicate) { samples in
-            // Group by source, pick the one with most samples (usually Watch during workout)
-            var bySource: [String: [HKQuantitySample]] = [:]
-            for s in samples {
-                let name = s.sourceRevision.source.name
-                bySource[name, default: []].append(s)
-            }
-            let bestSource = bySource.max(by: { $0.value.count < $1.value.count })?.value ?? samples
+        fetchSamples(.distanceWalkingRunning, predicate: predicate) { distSamples in
+            var distBySource: [String: [HKQuantitySample]] = [:]
+            for s in distSamples { distBySource[s.sourceRevision.source.name, default: []].append(s) }
 
-            var cumDist: Double = 0
-            for s in bestSource {
-                let d = s.quantity.doubleValue(for: .meter())
-                cumDist += d
-                result.distanceSamples.append(TimestampedValue(date: s.endDate, value: cumDist))
+            for (sourceName, samples) in distBySource {
+                var sd = result.sources.first(where: { $0.sourceName == sourceName }) ?? SourceData(sourceName: sourceName)
+                var cumDist: Double = 0
+                for s in samples {
+                    cumDist += s.quantity.doubleValue(for: .meter())
+                    sd.distanceSamples.append(TimestampedValue(date: s.endDate, value: cumDist))
+                }
+                sd.distanceMeters = cumDist
+                if let idx = result.sources.firstIndex(where: { $0.sourceName == sourceName }) {
+                    result.sources[idx] = sd
+                } else {
+                    result.sources.append(sd)
+                }
             }
-            result.distanceMeters = cumDist
             group.leave()
         }
 
