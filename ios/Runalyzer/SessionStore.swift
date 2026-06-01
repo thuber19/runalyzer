@@ -8,9 +8,15 @@ struct RecordedSample: Codable {
 }
 
 struct DeviceEvent: Codable, Identifiable {
-    var id: UUID = UUID()
     let reason: UInt8
-    let timestampSec: UInt32  // unix seconds or millis depending on sync
+    let offsetMs: UInt32  // H7: always relative ms from recording start
+
+    // H6: derive id from content, not random — stable across decodes
+    var id: String { "\(reason)-\(offsetMs)" }
+
+    private enum CodingKeys: String, CodingKey {
+        case reason, offsetMs
+    }
 
     var reasonString: String {
         switch reason {
@@ -87,58 +93,79 @@ class SessionStore: ObservableObject {
         loadSessions()
     }
 
-    /// Save a session downloaded from device flash. Returns true on success.
-    @discardableResult
-    func saveDownloadedSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double, startUnixMs: UInt64 = 0, events: [DeviceEvent]? = nil) -> Bool {
-        guard !samples.isEmpty else { return false }
+    /// Save a session downloaded from device flash. Completion called with success flag.
+    /// M2: Heavy work (analysis, encoding) done on background queue.
+    func saveDownloadedSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double, startUnixMs: UInt64 = 0, events: [DeviceEvent]? = nil, completion: @escaping (Bool) -> Void) {
+        guard !samples.isEmpty else { completion(false); return }
 
-        let fileName = "samples_\(UUID().uuidString.prefix(8)).json"
-        let analysis = RunMetrics.analyzeRecording(samples)
-
-        // Use wall-clock start time from device if available, otherwise approximate
-        let startDate: Date
-        let endDate: Date
+        // H8: Check for duplicate
         if startUnixMs > 0 {
-            startDate = Date(timeIntervalSince1970: Double(startUnixMs) / 1000.0)
-            endDate = startDate.addingTimeInterval(durationSec)
-        } else {
-            startDate = Date().addingTimeInterval(-durationSec)
-            endDate = Date()
+            let isDuplicate = sessions.contains { s in
+                let existingStart = UInt64(s.date.timeIntervalSince1970 * 1000)
+                return abs(Int64(existingStart) - Int64(startUnixMs)) < 5000 && s.sampleCount == samples.count
+            }
+            if isDuplicate {
+                print("Duplicate session detected — skipping save")
+                completion(true)
+                return
+            }
         }
 
-        let session = RunSession(
-            id: UUID(),
-            date: startDate,
-            endDate: endDate,
-            duration: durationSec,
-            sampleCount: samples.count,
-            avgCadence: Int(analysis.avgCadence),
-            totalSteps: analysis.totalSteps,
-            events: events,
-            samplesFileName: fileName
-        )
+        let dir = storageDir
+        let sessionsFile = sessionsURL
+        let fileName = "samples_\(UUID().uuidString.prefix(8)).json"
 
-        // Save samples file
-        do {
-            let data = try JSONEncoder().encode(samples)
-            try data.write(to: storageDir.appendingPathComponent(fileName), options: .atomic)
-        } catch {
-            print("FAILED to save samples: \(error)")
-            return false
+        DispatchQueue.global(qos: .userInitiated).async {
+            // Heavy work on background thread
+            let analysis = RunMetrics.analyzeRecording(samples)
+
+            let startDate: Date
+            let endDate: Date
+            if startUnixMs > 0 {
+                startDate = Date(timeIntervalSince1970: Double(startUnixMs) / 1000.0)
+                endDate = startDate.addingTimeInterval(durationSec)
+            } else {
+                startDate = Date().addingTimeInterval(-durationSec)
+                endDate = Date()
+            }
+
+            let session = RunSession(
+                id: UUID(),
+                date: startDate,
+                endDate: endDate,
+                duration: durationSec,
+                sampleCount: samples.count,
+                avgCadence: Int(analysis.avgCadence),
+                totalSteps: analysis.totalSteps,
+                events: events,
+                samplesFileName: fileName
+            )
+
+            // Save samples file
+            do {
+                let data = try JSONEncoder().encode(samples)
+                try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+            } catch {
+                print("FAILED to save samples: \(error)")
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            // Update UI on main thread
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { completion(false); return }
+                self.sessions.insert(session, at: 0)
+                if !self.saveSessions() {
+                    self.sessions.removeFirst()
+                    try? FileManager.default.removeItem(at: dir.appendingPathComponent(fileName))
+                    print("FAILED to save session index — rolled back")
+                    completion(false)
+                    return
+                }
+                print("Saved session: \(samples.count) samples, \(analysis.totalSteps) steps")
+                completion(true)
+            }
         }
-
-        // Save session index — both files must succeed
-        sessions.insert(session, at: 0)
-        if !saveSessions() {
-            // Rollback: remove the session we just added and delete the samples file
-            sessions.removeFirst()
-            try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(fileName))
-            print("FAILED to save session index — rolled back")
-            return false
-        }
-
-        print("Saved session: \(samples.count) samples, \(analysis.totalSteps) steps")
-        return true
     }
 
     func linkWorkout(_ workoutID: String, to sessionID: UUID) {

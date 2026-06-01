@@ -42,7 +42,11 @@ struct DeviceStatus {
     var isTimeSynced: Bool = false
     var maxSamples: UInt32 = 0
     var recordingDurationSec: UInt32 = 0
-    var recordingStartUnixMs: UInt64 = 0  // wall-clock start time
+    var recordingStartUnixMs: UInt64 = 0
+    var protocolVersion: UInt8 = 0
+    var headerVersion: UInt8 = 0
+
+    static let expectedProtocolVersion: UInt8 = 1
 
     var recordingStartDate: Date? {
         recordingStartUnixMs > 0 ? Date(timeIntervalSince1970: Double(recordingStartUnixMs) / 1000.0) : nil
@@ -87,13 +91,13 @@ enum AppState: Equatable {
 
 class BLEManager: NSObject, ObservableObject {
     // UUIDs
-    private let imuServiceUUID   = CBUUID(string: "12345678-1234-5678-1234-56789abcdef0")
-    private let imuCharUUID      = CBUUID(string: "12345678-1234-5678-1234-56789abcdef1")
-    private let controlCharUUID  = CBUUID(string: "12345678-1234-5678-1234-56789abcdef2")
-    private let statusCharUUID   = CBUUID(string: "12345678-1234-5678-1234-56789abcdef3")
-    private let downloadCharUUID = CBUUID(string: "12345678-1234-5678-1234-56789abcdef4")
-    private let configCharUUID   = CBUUID(string: "12345678-1234-5678-1234-56789abcdef5")
-    private let timesyncCharUUID = CBUUID(string: "12345678-1234-5678-1234-56789abcdef6")
+    private let imuServiceUUID   = CBUUID(string: "264f9cc7-8f8a-4aad-878a-d3615d12dccc")
+    private let imuCharUUID      = CBUUID(string: "264f9cc7-8f8a-4aad-878a-d3615d12dcc1")
+    private let controlCharUUID  = CBUUID(string: "264f9cc7-8f8a-4aad-878a-d3615d12dcc2")
+    private let statusCharUUID   = CBUUID(string: "264f9cc7-8f8a-4aad-878a-d3615d12dcc3")
+    private let downloadCharUUID = CBUUID(string: "264f9cc7-8f8a-4aad-878a-d3615d12dcc4")
+    private let configCharUUID   = CBUUID(string: "264f9cc7-8f8a-4aad-878a-d3615d12dcc5")
+    private let timesyncCharUUID = CBUUID(string: "264f9cc7-8f8a-4aad-878a-d3615d12dcc6")
     private let battServiceUUID  = CBUUID(string: "180F")
     private let battCharUUID     = CBUUID(string: "2A19")
 
@@ -164,6 +168,13 @@ class BLEManager: NSObject, ObservableObject {
         appState = .stopping
         UserDefaults.standard.set(false, forKey: wasRecordingKey)
         sendCommand(2)
+
+        // M7: timeout if device never transitions to hasData
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            guard let self, self.appState == .stopping else { return }
+            print("Stopping state timeout — forcing idle")
+            self.appState = .idle
+        }
     }
 
     func eraseData() {
@@ -195,6 +206,8 @@ class BLEManager: NSObject, ObservableObject {
 
     private func startDownload() {
         downloadedSamples.removeAll()
+        downloadedEvents.removeAll()
+        downloadRetryCount = 0
         expectedDownloadCount = deviceStatus.sampleCount
         downloadProgress = 0
         appState = .downloading
@@ -208,13 +221,24 @@ class BLEManager: NSObject, ObservableObject {
         resetDownloadTimeout()
     }
 
+    // H5: Increased timeout to 30s with retry
+    private var downloadRetryCount = 0
+
     private func resetDownloadTimeout() {
         downloadTimeoutTimer?.invalidate()
-        downloadTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: false) { [weak self] _ in
+        downloadTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false) { [weak self] _ in
             guard let self, self.appState == .downloading else { return }
-            print("Download timeout")
-            self.downloadedSamples.removeAll()
-            self.appState = .idle
+            self.downloadRetryCount += 1
+            if self.downloadRetryCount < 3 {
+                print("Download timeout — retry \(self.downloadRetryCount)/3")
+                self.requestNextChunk()
+            } else {
+                print("Download failed after 3 retries")
+                self.downloadedSamples.removeAll()
+                self.downloadedEvents.removeAll()
+                self.downloadRetryCount = 0
+                self.appState = .idle
+            }
         }
     }
 
@@ -235,12 +259,23 @@ class BLEManager: NSObject, ObservableObject {
             if data.count >= 24 {
                 deviceStatus.recordingStartUnixMs = buf.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
             }
+            if data.count >= 26 {
+                deviceStatus.protocolVersion = buf.loadUnaligned(fromByteOffset: 24, as: UInt8.self)
+                deviceStatus.headerVersion = buf.loadUnaligned(fromByteOffset: 25, as: UInt8.self)
+            }
         }
         onBattery?(Int(deviceStatus.batteryPercent))
 
         // First status after connect — full reconcile
         if !firstStatusReceived {
             firstStatusReceived = true
+
+            // Check protocol compatibility
+            if deviceStatus.protocolVersion > 0 && deviceStatus.protocolVersion != DeviceStatus.expectedProtocolVersion {
+                print("WARNING: protocol version mismatch — device=\(deviceStatus.protocolVersion) app=\(DeviceStatus.expectedProtocolVersion)")
+                appState = .error("Firmware update required (v\(deviceStatus.protocolVersion) vs v\(DeviceStatus.expectedProtocolVersion))")
+                return
+            }
             reconcileState()
             return
         }
@@ -325,7 +360,7 @@ class BLEManager: NSObject, ObservableObject {
                     guard off + 5 <= data.count else { break }
                     let reason = data[off]
                     let ts = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: off + 1, as: UInt32.self) }
-                    downloadedEvents.append(DeviceEvent(reason: reason, timestampSec: ts))
+                    downloadedEvents.append(DeviceEvent(reason: reason, offsetMs: ts))
                 }
                 print("Received \(downloadedEvents.count) events")
                 requestNextChunk()

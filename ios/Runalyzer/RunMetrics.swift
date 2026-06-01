@@ -13,12 +13,12 @@ class RunMetrics: ObservableObject {
     @Published var sampleCount: Int = 0
     @Published var lastTimestamp: UInt32 = 0
 
-    // Chart data (orientation-independent magnitudes)
+    // H3: Chart data uses fixed-size arrays with index (O(1) insert instead of O(n) removeFirst)
     @Published var accelHistory: [Float] = []
     @Published var gyroHistory: [Float] = []
     @Published var stepIntervals: [Float] = []
 
-    private let historySize = 500 // 5 seconds at 100Hz
+    private let historySize = 300 // ~3 seconds at 100Hz, ~12 seconds at 25Hz
 
     // Step detection state
     private var filteredAccel: Float = 0
@@ -38,11 +38,11 @@ class RunMetrics: ObservableObject {
         let accelMag = p.accelMagnitude
         let gyroMag = p.gyroMagnitude
 
-        // History
+        // H3: Use suffix instead of removeFirst (O(1) vs O(n))
         accelHistory.append(accelMag)
         gyroHistory.append(gyroMag)
-        if accelHistory.count > historySize { accelHistory.removeFirst() }
-        if gyroHistory.count > historySize { gyroHistory.removeFirst() }
+        if accelHistory.count > historySize * 2 { accelHistory = Array(accelHistory.suffix(historySize)) }
+        if gyroHistory.count > historySize * 2 { gyroHistory = Array(gyroHistory.suffix(historySize)) }
 
         // Peak impact — decays to baseline over ~3 seconds (0.99^100 ≈ 0.37)
         if accelMag > peakImpact { peakImpact = accelMag }
@@ -136,31 +136,35 @@ class RunMetrics: ObservableObject {
             return RecordingAnalysis.empty
         }
 
-        // Step 1: Compute accel magnitude + gyro per sample
-        var rawMag: [Float] = []
-        var timestamps: [UInt32] = []
-        var gyroX: [Float] = [], gyroY: [Float] = [], gyroZ: [Float] = []
+        // M3: Pre-allocate all arrays to avoid repeated resizing
+        let n = samples.count
+        let alpha: Float = 0.1
 
-        for s in samples {
+        var rawMag = [Float](repeating: 0, count: n)
+        var timestamps = [UInt32](repeating: 0, count: n)
+        var filtered = [Float](repeating: 0, count: n)
+        // Compute gyro variance incrementally (avoid storing 3 full arrays)
+        var gyroSumX: Float = 0, gyroSumY: Float = 0, gyroSumZ: Float = 0
+        var gyroSqSumX: Float = 0, gyroSqSumY: Float = 0, gyroSqSumZ: Float = 0
+
+        // Single pass: compute magnitude, filter, and gyro statistics
+        for i in 0..<n {
+            let s = samples[i]
             let ax = Float(s.ax) * IMUPacket.accelScale
             let ay = Float(s.ay) * IMUPacket.accelScale
             let az = Float(s.az) * IMUPacket.accelScale
-            rawMag.append(sqrtf(ax*ax + ay*ay + az*az))
-            timestamps.append(s.timestamp)
-            gyroX.append(Float(s.gx) * IMUPacket.gyroScale)
-            gyroY.append(Float(s.gy) * IMUPacket.gyroScale)
-            gyroZ.append(Float(s.gz) * IMUPacket.gyroScale)
-        }
+            let mag = sqrtf(ax*ax + ay*ay + az*az)
+            rawMag[i] = mag
+            timestamps[i] = s.timestamp
 
-        // Step 2: Remove gravity
-        let noGravity = rawMag.map { $0 - 1.0 }
+            let noGrav = mag - 1.0
+            filtered[i] = (i == 0) ? noGrav : alpha * noGrav + (1 - alpha) * filtered[i-1]
 
-        // Step 3: Low-pass filter (alpha=0.1 → ~1.6Hz cutoff at 100Hz)
-        let alpha: Float = 0.1
-        var filtered = [Float](repeating: 0, count: noGravity.count)
-        filtered[0] = noGravity[0]
-        for i in 1..<noGravity.count {
-            filtered[i] = alpha * noGravity[i] + (1 - alpha) * filtered[i-1]
+            let gx = Float(s.gx) * IMUPacket.gyroScale
+            let gy = Float(s.gy) * IMUPacket.gyroScale
+            let gz = Float(s.gz) * IMUPacket.gyroScale
+            gyroSumX += gx; gyroSumY += gy; gyroSumZ += gz
+            gyroSqSumX += gx*gx; gyroSqSumY += gy*gy; gyroSqSumZ += gz*gz
         }
 
         // Step 4: Dynamic threshold
@@ -199,30 +203,28 @@ class RunMetrics: ObservableObject {
             prevSlope = slope
         }
 
-        // Step 6: Determine dominant gyro axis for L/R detection
-        // Find which gyro axis has the most variance — that's the pelvic rotation axis
-        func gyroVariance(_ arr: [Float]) -> Float {
-            let m = arr.reduce(0, +) / Float(arr.count)
-            return arr.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Float(arr.count)
-        }
-        let varX = gyroVariance(gyroX)
-        let varY = gyroVariance(gyroY)
-        let varZ = gyroVariance(gyroZ)
-        let dominantGyro: [Float]
+        // M3: Determine dominant gyro axis using incremental variance (no extra arrays)
+        let fn = Float(n)
+        let varX = gyroSqSumX/fn - (gyroSumX/fn)*(gyroSumX/fn)
+        let varY = gyroSqSumY/fn - (gyroSumY/fn)*(gyroSumY/fn)
+        let varZ = gyroSqSumZ/fn - (gyroSumZ/fn)*(gyroSumZ/fn)
+        let dominantAxisIdx: Int  // 0=X, 1=Y, 2=Z
         let dominantAxis: String
-        if varX >= varY && varX >= varZ {
-            dominantGyro = gyroX; dominantAxis = "X"
-        } else if varY >= varX && varY >= varZ {
-            dominantGyro = gyroY; dominantAxis = "Y"
-        } else {
-            dominantGyro = gyroZ; dominantAxis = "Z"
-        }
+        if varX >= varY && varX >= varZ { dominantAxisIdx = 0; dominantAxis = "X" }
+        else if varY >= varX && varY >= varZ { dominantAxisIdx = 1; dominantAxis = "Y" }
+        else { dominantAxisIdx = 2; dominantAxis = "Z" }
 
-        // Low-pass filter the dominant gyro axis too
-        var filteredGyro = [Float](repeating: 0, count: dominantGyro.count)
-        filteredGyro[0] = dominantGyro[0]
-        for i in 1..<dominantGyro.count {
-            filteredGyro[i] = alpha * dominantGyro[i] + (1 - alpha) * filteredGyro[i-1]
+        // Build filtered gyro for the dominant axis only (one array, not three)
+        var filteredGyro = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            let s = samples[i]
+            let gval: Float
+            switch dominantAxisIdx {
+            case 0: gval = Float(s.gx) * IMUPacket.gyroScale
+            case 1: gval = Float(s.gy) * IMUPacket.gyroScale
+            default: gval = Float(s.gz) * IMUPacket.gyroScale
+            }
+            filteredGyro[i] = (i == 0) ? gval : alpha * gval + (1 - alpha) * filteredGyro[i-1]
         }
 
         // Step 7: Classify each step as Side A or Side B based on gyro sign at step

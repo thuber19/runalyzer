@@ -24,17 +24,18 @@ struct RunalyzerApp: App {
                         metrics.batteryLevel = level
                     }
                     ble.onDownloadComplete = { samples, status, events in
-                        let saved = sessions.saveDownloadedSession(
+                        sessions.saveDownloadedSession(
                             samples: samples,
                             sampleRateHz: Int(status.sampleRateHz),
                             durationSec: Double(status.recordingDurationSec),
                             startUnixMs: status.recordingStartUnixMs,
                             events: events.isEmpty ? nil : events
-                        )
-                        if saved {
-                            ble.eraseData()
-                        } else {
-                            print("ERROR: failed to save session, NOT erasing device")
+                        ) { saved in
+                            if saved {
+                                ble.eraseData()
+                            } else {
+                                print("ERROR: failed to save session, NOT erasing device")
+                            }
                         }
                     }
                 }

@@ -16,12 +16,14 @@ struct AppleWorkout: Identifiable {
         return String(format: "%d:%02d", m, s)
     }
 
-    var dateString: String {
+    private static let fmt: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .short
-        return f.string(from: startDate)
-    }
+        return f
+    }()
+
+    var dateString: String { Self.fmt.string(from: startDate) }
 
     var activityName: String {
         switch activityType {
@@ -79,6 +81,9 @@ class HealthKitManager: ObservableObject {
     @Published var authorized = false
     @Published var workouts: [AppleWorkout] = []
 
+    // M4: cache to avoid redundant queries
+    private var lastWorkoutFetch: Date?
+
     private let readTypes: Set<HKObjectType> = {
         var types = Set<HKObjectType>()
         types.insert(HKQuantityType.quantityType(forIdentifier: .heartRate)!)
@@ -113,8 +118,10 @@ class HealthKitManager: ObservableObject {
     }
 
     // MARK: - Fetch Recent Workouts
-    func fetchRecentWorkouts() {
-        print("Fetching recent workouts...")
+    func fetchRecentWorkouts(force: Bool = false) {
+        // M4: skip if fetched within last 30 seconds
+        if !force, let last = lastWorkoutFetch, Date().timeIntervalSince(last) < 30 { return }
+        lastWorkoutFetch = Date()
         let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),

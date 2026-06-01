@@ -94,6 +94,7 @@ struct SettingsView: View {
             if ble.connected {
                 VStack(spacing: 8) {
                     infoRow(label: "Firmware", value: "v3.0")
+                    infoRow(label: "Protocol", value: "v\(ble.deviceStatus.protocolVersion)")
                     infoRow(label: "Flash", value: "2 MB")
                     infoRow(label: "Max Samples", value: "\(ble.deviceStatus.maxSamples)")
                     infoRow(label: "Stored", value: "\(ble.deviceStatus.sampleCount)")

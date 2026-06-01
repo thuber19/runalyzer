@@ -476,10 +476,10 @@ struct SessionDetailView: View {
                                 .frame(width: 16)
                             Text(event.reasonString).font(.caption)
                             Spacer()
-                            if event.timestampSec > 1000000000 {
-                                Text(Self.eventFmt.string(from: Date(timeIntervalSince1970: Double(event.timestampSec))))
-                                    .font(.caption2.monospacedDigit()).foregroundColor(.gray)
-                            }
+                            // H7: show as offset from session start
+                            let secs = event.offsetMs / 1000
+                            Text("+\(secs / 60):\(String(format: "%02d", secs % 60))")
+                                .font(.caption2.monospacedDigit()).foregroundColor(.gray)
                         }
                     }
                 }

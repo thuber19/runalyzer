@@ -77,13 +77,16 @@ ios/            iOS app (SwiftUI, requires Xcode 15+)
 
 The sensor exposes one GATT service with these characteristics:
 
-| UUID suffix | Name | Properties | Description |
-|-------------|------|------------|-------------|
-| `def1` | IMU Stream | Read, Notify | Live 16-byte packets: `[u32 timestamp, i16 ax,ay,az,gx,gy,gz]` |
-| `def2` | Control | Write | Commands: 1=start, 2=stop, 3=erase, 4=begin download, 5=next chunk |
-| `def3` | Status | Read, Notify | 20-byte device status (state, samples, rate, battery, capacity, duration) |
-| `def4` | Download | Read, Notify | Data chunks: `[u32 offset, N×12B samples]`, end marker: `[0xFF×4]` |
-| `def5` | Config | Read, Write | Sample rate in Hz (10-100) |
+Service UUID: `264f9cc7-8f8a-4aad-878a-d3615d12dccc`
+
+| UUID (last 4) | Name | Properties | Description |
+|----------------|------|------------|-------------|
+| `dcc1` | IMU Stream | Read, Notify | Live 16-byte packets: `[u32 timestamp, i16 ax,ay,az,gx,gy,gz]` |
+| `dcc2` | Control | Write | Commands: 1=start, 2=stop, 3=erase, 4=begin download, 5=next chunk |
+| `dcc3` | Status | Read, Notify | 28-byte device status (state, samples, rate, battery, capacity, duration, start time) |
+| `dcc4` | Download | Read, Notify | Data chunks: `[u32 offset, N×12B samples]`, end marker: `[0xFF×4]` |
+| `dcc5` | Config | Read, Write | Sample rate in Hz (10-100) |
+| `dcc6` | Time Sync | Write | 8-byte Unix timestamp (ms) — synced from phone on connect |
 
 Download uses a request-response protocol (command 5 requests each chunk) for reliable transfer. Samples stored on flash are 12 bytes each (6 axes, no timestamp). Timestamps are reconstructed from the sample index and recording rate during download.
 

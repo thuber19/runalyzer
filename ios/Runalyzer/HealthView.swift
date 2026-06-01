@@ -21,7 +21,9 @@ struct HealthView: View {
                 VStack(spacing: 16) {
                     todaySummary
                     workoutList
+                    #if DEBUG
                     debugSection
+                    #endif
                 }
                 .padding()
             }
