@@ -2,10 +2,14 @@ import SwiftUI
 
 @main
 struct RunalyzerApp: App {
+    // Legacy (views still depend on this)
     @StateObject private var ble = BLEManager()
     @StateObject private var metrics = RunMetrics()
     @StateObject private var sessions = SessionStore()
     @StateObject private var healthKit = HealthKitManager()
+
+    // New architecture (available for new device types)
+    @StateObject private var coordinator = DeviceCoordinator()
 
     var body: some Scene {
         WindowGroup {
@@ -14,17 +18,19 @@ struct RunalyzerApp: App {
                 .environmentObject(metrics)
                 .environmentObject(sessions)
                 .environmentObject(healthKit)
+                .environmentObject(coordinator)
                 .onAppear {
                     healthKit.requestAuthorization()
 
-                    ble.onPacket = { packet in
-                        metrics.process(packet)
+                    // Legacy IMU wiring (existing views use BLEManager)
+                    ble.onPacket = { [weak metrics] packet in
+                        metrics?.process(packet)
                     }
-                    ble.onBattery = { level in
-                        metrics.batteryLevel = level
+                    ble.onBattery = { [weak metrics] level in
+                        metrics?.batteryLevel = level
                     }
-                    ble.onDownloadComplete = { samples, status, events in
-                        sessions.saveDownloadedSession(
+                    ble.onDownloadComplete = { [weak sessions] samples, status, events in
+                        sessions?.saveDownloadedSession(
                             samples: samples,
                             sampleRateHz: Int(status.sampleRateHz),
                             durationSec: Double(status.recordingDurationSec),
@@ -33,8 +39,6 @@ struct RunalyzerApp: App {
                         ) { saved in
                             if saved {
                                 ble.eraseData()
-                            } else {
-                                print("ERROR: failed to save session, NOT erasing device")
                             }
                         }
                     }
