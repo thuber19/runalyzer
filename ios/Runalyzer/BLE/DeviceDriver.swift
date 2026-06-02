@@ -22,7 +22,7 @@ enum DeviceConnectionState: Equatable {
 enum DriverEvent {
     case battery(Int)                       // 0-100%
     case status(String)                     // human-readable status text
-    case measurementReady(any MeasurementData)  // final result to store
+    case measurementReady(Any)  // final result to store (ScaleMeasurement, etc.)
 }
 
 /// The protocol every device driver must conform to.

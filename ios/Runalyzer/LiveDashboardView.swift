@@ -2,29 +2,25 @@ import SwiftUI
 import Charts
 
 struct LiveDashboardView: View {
-    @EnvironmentObject var ble: BLEManager
+    @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var metrics: RunMetrics
 
+    private var imu: IMUSensorDriver? { coordinator.imuDriver }
+    private var isConnected: Bool { imu != nil }
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 16) {
-                    connectionBanner
-                    recordingControls
-                    if ble.connected && ble.appState != .downloading {
-                        metricsGrid
-                        accelChart
-                        gyroChart
-                    } else if ble.appState == .downloading {
-                        Text("Live preview paused during sync")
-                            .font(.caption).foregroundColor(.gray)
-                            .frame(maxWidth: .infinity).padding()
-                    }
-                }
-                .padding()
+        VStack(spacing: 16) {
+            connectionBanner
+            recordingControls
+            if isConnected && imu?.appState != .downloading {
+                metricsGrid
+                accelChart
+                gyroChart
+            } else if imu?.appState == .downloading {
+                Text("Live preview paused during sync")
+                    .font(.caption).foregroundColor(.gray)
+                    .frame(maxWidth: .infinity).padding()
             }
-            .background(Color(hex: 0x1a1a2e))
-            .navigationTitle("Runalyzer")
         }
     }
 
@@ -32,21 +28,20 @@ struct LiveDashboardView: View {
     private var connectionBanner: some View {
         HStack {
             Circle()
-                .fill(ble.connected ? Color.green : Color.red)
+                .fill(isConnected ? Color.green : Color.red)
                 .frame(width: 10, height: 10)
-            Text(ble.connected ? "Connected" : "Scanning...")
+            Text(isConnected ? "Connected" : "Scanning...")
                 .font(.subheadline)
-
             Spacer()
 
-            if ble.connected && ble.deviceStatus.batteryPercent > 0 {
+            if let status = imu?.deviceStatus, status.batteryPercent > 0 {
                 HStack(spacing: 4) {
-                    if ble.deviceStatus.isCharging {
+                    if status.isCharging {
                         Image(systemName: "bolt.fill").foregroundColor(.yellow).font(.caption)
                     }
-                    Text("\(ble.deviceStatus.batteryPercent)%")
+                    Text("\(status.batteryPercent)%")
                         .font(.subheadline)
-                        .foregroundColor(ble.deviceStatus.batteryPercent < 20 ? .red : .green)
+                        .foregroundColor(status.batteryPercent < 20 ? .red : .green)
                 }
             }
         }
@@ -58,91 +53,89 @@ struct LiveDashboardView: View {
     // MARK: - Recording Controls
     private var recordingControls: some View {
         VStack(spacing: 12) {
-            if !ble.connected && ble.appState != .recording {
-                // Not connected and not recording on device
+            let appState = imu?.appState ?? .disconnected
+
+            if !isConnected && appState != .recording {
                 Label("Connect sensor to start", systemImage: "antenna.radiowaves.left.and.right")
                     .frame(maxWidth: .infinity).padding()
                     .foregroundColor(.gray)
                     .background(Color(hex: 0x16213e)).cornerRadius(12)
             } else {
-            switch ble.appState {
-            case .disconnected, .idle:
-                let hasUnsyncedData = ble.deviceStatus.state == .hasData && ble.deviceStatus.sampleCount > 0
-                Button(action: {
-                    metrics.reset()
-                    ble.startRecording()
-                }) {
-                    Label("Start Recording", systemImage: "record.circle")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity).padding()
-                        .background(ble.connected && !hasUnsyncedData ? Color(hex: 0xe94560) : Color.gray)
-                        .foregroundColor(.white).cornerRadius(12)
-                }
-                .disabled(!ble.connected || hasUnsyncedData)
-
-                if hasUnsyncedData {
-                    Text("Previous session not synced yet. Waiting for download...")
-                        .font(.caption).foregroundColor(.orange).multilineTextAlignment(.center)
-                }
-
-            case .recording:
-                VStack(spacing: 8) {
-                    HStack {
-                        Circle().fill(.red).frame(width: 10, height: 10)
-                        Text("REC").font(.headline.bold()).foregroundColor(.red)
-                        Text(ble.deviceStatus.durationString)
-                            .font(.headline.monospacedDigit())
-                        Spacer()
-                        Text("\(ble.deviceStatus.sampleCount) samples")
-                            .font(.caption.monospacedDigit()).foregroundColor(.gray)
-                    }
-
-                    Button(action: { ble.stopRecording() }) {
-                        Label("Stop Recording", systemImage: "stop.circle.fill")
+                switch appState {
+                case .disconnected, .idle:
+                    let hasUnsynced = imu?.deviceStatus.state == .hasData && (imu?.deviceStatus.sampleCount ?? 0) > 0
+                    Button(action: {
+                        metrics.reset()
+                        imu?.startRecording()
+                    }) {
+                        Label("Start Recording", systemImage: "record.circle")
+                            .font(.headline)
                             .frame(maxWidth: .infinity).padding()
-                            .background(Color.red).foregroundColor(.white).cornerRadius(12)
+                            .background(isConnected && !hasUnsynced ? Color(hex: 0xe94560) : Color.gray)
+                            .foregroundColor(.white).cornerRadius(12)
                     }
-                    .disabled(!ble.connected)
+                    .disabled(!isConnected || hasUnsynced)
 
-                    if !ble.connected {
-                        Text("Device recording independently. Reconnect to stop.")
-                            .font(.caption).foregroundColor(.orange)
+                    if hasUnsynced {
+                        Text("Previous session not synced yet. Waiting for download...")
+                            .font(.caption).foregroundColor(.orange).multilineTextAlignment(.center)
                     }
-                }
-                .padding()
-                .background(Color(hex: 0x16213e)).cornerRadius(12)
 
-            case .stopping:
-                HStack {
-                    ProgressView().tint(.orange)
-                    Text("Stopping...").foregroundColor(.orange)
-                }
-                .frame(maxWidth: .infinity).padding()
-                .background(Color.orange.opacity(0.1)).cornerRadius(12)
+                case .recording:
+                    VStack(spacing: 8) {
+                        HStack {
+                            Circle().fill(.red).frame(width: 10, height: 10)
+                            Text("REC").font(.headline.bold()).foregroundColor(.red)
+                            Text(imu?.deviceStatus.durationString ?? "--")
+                                .font(.headline.monospacedDigit())
+                            Spacer()
+                            Text("\(imu?.deviceStatus.sampleCount ?? 0) samples")
+                                .font(.caption.monospacedDigit()).foregroundColor(.gray)
+                        }
+                        Button(action: { imu?.stopRecording() }) {
+                            Label("Stop Recording", systemImage: "stop.circle.fill")
+                                .frame(maxWidth: .infinity).padding()
+                                .background(Color.red).foregroundColor(.white).cornerRadius(12)
+                        }
+                        .disabled(!isConnected)
+                        if !isConnected {
+                            Text("Device recording independently. Reconnect to stop.")
+                                .font(.caption).foregroundColor(.orange)
+                        }
+                    }
+                    .padding()
+                    .background(Color(hex: 0x16213e)).cornerRadius(12)
 
-            case .downloading:
-                VStack(spacing: 8) {
+                case .stopping:
                     HStack {
-                        Text("Syncing session...").font(.subheadline).foregroundColor(.cyan)
-                        Spacer()
-                        Text("\(Int(ble.downloadProgress * 100))%")
-                            .font(.subheadline.monospacedDigit()).foregroundColor(.cyan)
+                        ProgressView().tint(.orange)
+                        Text("Stopping...").foregroundColor(.orange)
                     }
-                    ProgressView(value: ble.downloadProgress).tint(.cyan)
+                    .frame(maxWidth: .infinity).padding()
+                    .background(Color.orange.opacity(0.1)).cornerRadius(12)
 
-                }
-                .padding()
-                .background(Color.cyan.opacity(0.1)).cornerRadius(12)
+                case .downloading:
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Syncing session...").font(.subheadline).foregroundColor(.cyan)
+                            Spacer()
+                            Text("\(Int((imu?.downloadProgress ?? 0) * 100))%")
+                                .font(.subheadline.monospacedDigit()).foregroundColor(.cyan)
+                        }
+                        ProgressView(value: imu?.downloadProgress ?? 0).tint(.cyan)
+                    }
+                    .padding()
+                    .background(Color.cyan.opacity(0.1)).cornerRadius(12)
 
-            case .error(let msg):
-                VStack(spacing: 8) {
-                    Text(msg).font(.subheadline).foregroundColor(.red)
-                    Text("Will retry automatically...").font(.caption).foregroundColor(.gray)
+                case .error(let msg):
+                    VStack(spacing: 8) {
+                        Text(msg).font(.subheadline).foregroundColor(.red)
+                        Text("Will retry automatically...").font(.caption).foregroundColor(.gray)
+                    }
+                    .padding()
+                    .background(Color.red.opacity(0.1)).cornerRadius(12)
                 }
-                .padding()
-                .background(Color.red.opacity(0.1)).cornerRadius(12)
             }
-            } // end else (connected)
         }
     }
 
@@ -217,4 +210,3 @@ struct MetricCard: View {
         .cornerRadius(10)
     }
 }
-

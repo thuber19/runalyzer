@@ -3,10 +3,9 @@ import CoreBluetooth
 import Combine
 
 /// Central coordinator for all BLE device management.
-/// Owns the single CBCentralManager, routes to device-specific drivers.
+/// Single CBCentralManager, routes to device-specific drivers.
 class DeviceCoordinator: NSObject, ObservableObject {
 
-    // All registered device types — add new descriptors here
     static let registeredDevices: [DeviceDescriptor] = [
         IMUSensorDescriptor.descriptor,
         QNScaleDescriptor.descriptor,
@@ -18,52 +17,61 @@ class DeviceCoordinator: NSObject, ObservableObject {
     @Published var discoveredDevices: [DiscoveredDevice] = []
     @Published private(set) var activeDrivers: [UUID: any DeviceDriver] = [:]
 
-    // Sub-managers
+    // Typed driver references for views to observe
+    @Published var imuDriver: IMUSensorDriver?
+    @Published var scaleDriver: QNScaleDriver?
+
     let registry = DeviceRegistry()
 
-    // Private
     private var centralManager: CBCentralManager!
     private var cancellables = Set<AnyCancellable>()
+    private var peripheralDescriptorMap: [UUID: DeviceDescriptor] = [:]  // remember which descriptor matched
+    private var scanTimer: Timer?
+
+    private static let restoreIdentifier = "runalyzer-central"
 
     override init() {
         super.init()
-        centralManager = CBCentralManager(delegate: self, queue: nil)
+        centralManager = CBCentralManager(
+            delegate: self,
+            queue: nil,
+            options: [CBCentralManagerOptionRestoreIdentifierKey: Self.restoreIdentifier]
+        )
     }
 
     // MARK: - Scanning
 
-    func startScanning() {
+    func startScanning(duration: TimeInterval = 30) {
         guard centralManager.state == .poweredOn else { return }
-        discoveredDevices.removeAll()
-        let allServiceUUIDs = Self.registeredDevices.flatMap(\.serviceUUIDs)
-        centralManager.scanForPeripherals(
-            withServices: allServiceUUIDs.isEmpty ? nil : allServiceUUIDs,
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
-        )
+        // Don't clear discovered — accumulate
+        // Scan for all registered service UUIDs, plus nil to catch devices that don't advertise services
+        centralManager.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         isScanning = true
+
+        scanTimer?.invalidate()
+        scanTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+            self?.stopScanning()
+        }
     }
 
     func stopScanning() {
         centralManager.stopScan()
         isScanning = false
+        scanTimer?.invalidate()
+        scanTimer = nil
     }
 
     // MARK: - Connection
 
     func connect(_ device: DiscoveredDevice) {
+        peripheralDescriptorMap[device.id] = device.descriptor
         centralManager.connect(device.peripheral, options: nil)
-        // Update discovered device state
-        if let idx = discoveredDevices.firstIndex(where: { $0.id == device.id }) {
-            discoveredDevices[idx].isConnected = true
-        }
     }
 
     func disconnect(_ deviceID: UUID) {
         guard let driver = activeDrivers[deviceID] else { return }
         centralManager.cancelPeripheralConnection(driver.peripheral)
     }
-
-    // MARK: - Pairing
 
     func pair(_ device: DiscoveredDevice, displayName: String? = nil) {
         let known = KnownDevice(
@@ -82,29 +90,25 @@ class DeviceCoordinator: NSObject, ObservableObject {
         registry.forget(deviceID)
     }
 
-    // MARK: - Driver Access
+    // MARK: - Descriptor Matching
 
-    /// Get a specific driver type for a connected device.
-    func driver<T: DeviceDriver>(ofType type: T.Type) -> T? {
-        activeDrivers.values.first(where: { $0 is T }) as? T
-    }
+    private func matchDescriptor(for peripheral: CBPeripheral, advertisementData: [String: Any]) -> DeviceDescriptor? {
+        let advertisedServices = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+        let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? ""
 
-    /// Get all drivers of a specific type.
-    func drivers<T: DeviceDriver>(ofType type: T.Type) -> [T] {
-        activeDrivers.values.compactMap { $0 as? T }
-    }
-
-    // MARK: - Private: Driver Creation
-
-    private func createDriver(for peripheral: CBPeripheral, descriptor: DeviceDescriptor) -> any DeviceDriver {
-        let driver = descriptor.driverFactory(peripheral)
-        return driver
-    }
-
-    private func matchDescriptor(for advertisedServices: [CBUUID]) -> DeviceDescriptor? {
-        Self.registeredDevices.first { descriptor in
-            descriptor.serviceUUIDs.contains(where: advertisedServices.contains)
+        // Match by advertised service UUID
+        for descriptor in Self.registeredDevices {
+            if descriptor.serviceUUIDs.contains(where: { advertisedServices.contains($0) }) {
+                return descriptor
+            }
         }
+
+        // Match by name patterns
+        let lowName = name.lowercased()
+        if lowName.contains("runalyzer") { return IMUSensorDescriptor.descriptor }
+        if lowName.contains("qn-scale") || lowName.contains("qn_scale") { return QNScaleDescriptor.descriptor }
+
+        return nil
     }
 }
 
@@ -114,19 +118,42 @@ extension DeviceCoordinator: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         bluetoothState = central.state
         if central.state == .poweredOn {
-            // Auto-connect known devices
             startScanning()
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        // Recover peripherals that were connected before the app was killed
+        if let peripherals = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral] {
+            for peripheral in peripherals {
+                // Try to match descriptor from registry
+                if let known = registry.knownDevices.first(where: { $0.id == peripheral.identifier }) {
+                    if let descriptor = Self.registeredDevices.first(where: { $0.id == known.descriptorID }) {
+                        peripheralDescriptorMap[peripheral.identifier] = descriptor
+                        let driver = descriptor.driverFactory(peripheral)
+                        driver.connectionState = .connected
+                        activeDrivers[peripheral.identifier] = driver
+
+                        if let imu = driver as? IMUSensorDriver { imuDriver = imu }
+                        if let scale = driver as? QNScaleDriver { scaleDriver = scale }
+
+                        peripheral.delegate = self
+                        peripheral.discoverServices(descriptor.serviceUUIDs)
+                    }
+                }
+            }
         }
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
                         advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        let advertisedServices = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
+        guard let descriptor = matchDescriptor(for: peripheral, advertisementData: advertisementData) else { return }
+
         let name = peripheral.name ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? "Unknown"
-
-        guard let descriptor = matchDescriptor(for: advertisedServices) else { return }
-
         let isKnown = registry.isKnown(peripheral.identifier)
+
+        // Remember descriptor for this peripheral
+        peripheralDescriptorMap[peripheral.identifier] = descriptor
 
         // Update or add to discovered list
         if let idx = discoveredDevices.firstIndex(where: { $0.id == peripheral.identifier }) {
@@ -142,28 +169,38 @@ extension DeviceCoordinator: CBCentralManagerDelegate {
             ))
         }
 
-        // Auto-connect if known
+        // Auto-connect known devices
         if isKnown && registry.shouldAutoConnect(peripheral.identifier) {
             if activeDrivers[peripheral.identifier] == nil {
+                peripheralDescriptorMap[peripheral.identifier] = descriptor
                 central.connect(peripheral, options: nil)
             }
         }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        // Find the descriptor for this peripheral
-        let discovered = discoveredDevices.first(where: { $0.id == peripheral.identifier })
-        guard let descriptor = discovered?.descriptor else { return }
+        guard let descriptor = peripheralDescriptorMap[peripheral.identifier] else { return }
 
-        // Create driver
-        let driver = createDriver(for: peripheral, descriptor: descriptor)
+        let driver = descriptor.driverFactory(peripheral)
         driver.connectionState = .connected
         activeDrivers[peripheral.identifier] = driver
 
-        // Update registry
-        registry.updateLastSeen(peripheral.identifier)
+        // Set typed references
+        if let imu = driver as? IMUSensorDriver { imuDriver = imu }
+        if let scale = driver as? QNScaleDriver { scaleDriver = scale }
 
-        // Set delegate and discover services
+        // Forward driver's objectWillChange to coordinator so views refresh
+        if let imuDriver = driver as? IMUSensorDriver {
+            imuDriver.objectWillChange.sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }.store(in: &cancellables)
+        } else if let scaleDriver = driver as? QNScaleDriver {
+            scaleDriver.objectWillChange.sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }.store(in: &cancellables)
+        }
+
+        registry.updateLastSeen(peripheral.identifier)
         peripheral.delegate = self
         peripheral.discoverServices(descriptor.serviceUUIDs)
     }
@@ -173,14 +210,16 @@ extension DeviceCoordinator: CBCentralManagerDelegate {
             driver.didDisconnect()
             driver.connectionState = .disconnected
         }
+
+        if activeDrivers[peripheral.identifier] is IMUSensorDriver { imuDriver = nil }
+        if activeDrivers[peripheral.identifier] is QNScaleDriver { scaleDriver = nil }
         activeDrivers.removeValue(forKey: peripheral.identifier)
 
-        // Update discovered list
         if let idx = discoveredDevices.firstIndex(where: { $0.id == peripheral.identifier }) {
             discoveredDevices[idx].isConnected = false
         }
 
-        // Auto-reconnect if known
+        // Auto-reconnect
         if registry.shouldAutoConnect(peripheral.identifier) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 self?.startScanning()
@@ -189,7 +228,7 @@ extension DeviceCoordinator: CBCentralManagerDelegate {
     }
 }
 
-// MARK: - CBPeripheralDelegate (routes to drivers)
+// MARK: - CBPeripheralDelegate
 
 extension DeviceCoordinator: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
@@ -204,12 +243,13 @@ extension DeviceCoordinator: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let driver = activeDrivers[peripheral.identifier] else { return }
-        DispatchQueue.main.async { [weak driver] in
-            driver?.didUpdateValue(for: characteristic)
+        // Dispatch to next run loop cycle to let BLE stack breathe between chunks
+        DispatchQueue.main.async {
+            driver.didUpdateValue(for: characteristic)
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        // Drivers can handle write confirmations if needed
+        // Drivers handle write confirmations internally if needed
     }
 }

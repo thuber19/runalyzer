@@ -687,8 +687,8 @@ void loop() {
     }
   }
 
-  // Status
-  if (now_ms - lastStatus_ms >= 2000) {
+  // Status (pause during download to avoid BLE buffer congestion)
+  if (!isDownloading && now_ms - lastStatus_ms >= 2000) {
     lastStatus_ms = now_ms;
     if (bleConnected) updateStatus();
   }

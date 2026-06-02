@@ -89,18 +89,31 @@ struct DeviceListView: View {
 
     // MARK: - Row Views
 
+    @ViewBuilder
+    private func deviceSettingsDestination(_ driver: any DeviceDriver) -> some View {
+        if driver is IMUSensorDriver {
+            IMUSettingsView()
+        } else if driver is QNScaleDriver {
+            ScaleSettingsView()
+        } else {
+            Text("No settings available for this device")
+        }
+    }
+
     private func connectedRow(_ driver: any DeviceDriver) -> some View {
-        HStack {
-            Image(systemName: driver.descriptor.icon)
-                .foregroundColor(.green)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(driver.displayName).font(.body)
-                Text(driver.descriptor.displayName)
-                    .font(.caption).foregroundColor(.gray)
+        NavigationLink(destination: deviceSettingsDestination(driver)) {
+            HStack {
+                Image(systemName: driver.descriptor.icon)
+                    .foregroundColor(.green)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(driver.displayName).font(.body)
+                    Text(driver.descriptor.displayName)
+                        .font(.caption).foregroundColor(.gray)
+                }
+                Spacer()
+                Circle().fill(.green).frame(width: 8, height: 8)
             }
-            Spacer()
-            Circle().fill(.green).frame(width: 8, height: 8)
         }
         .swipeActions(edge: .trailing) {
             Button("Disconnect") {

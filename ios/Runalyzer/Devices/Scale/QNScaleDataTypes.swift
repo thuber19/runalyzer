@@ -1,7 +1,7 @@
 import Foundation
 
 /// A single body composition measurement from the QN scale.
-struct ScaleMeasurement: MeasurementData, Codable, Identifiable {
+struct ScaleMeasurement: Codable, Identifiable {
     let id: UUID
     let date: Date
     let deviceName: String
@@ -22,12 +22,6 @@ struct ScaleMeasurement: MeasurementData, Codable, Identifiable {
 
     // Profile used (stored for reproducibility)
     let profile: UserProfile
-
-    var deviceType: String { "qn_scale" }
-
-    var summary: String {
-        String(format: "%.1f kg · %.1f%% fat · %.1f kg muscle", weightKg, bodyFatPercent, muscleMassKg)
-    }
 
     /// Create from raw reading + profile
     static func from(weightKg: Double, impedanceOhm: Double, profile: UserProfile, deviceName: String = "QN-Scale") -> ScaleMeasurement {

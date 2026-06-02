@@ -3,19 +3,19 @@ import SwiftUI
 struct ContentView: View {
     var body: some View {
         TabView {
-            LiveDashboardView()
+            RunalyzerTab()
                 .tabItem {
-                    Label("Live", systemImage: "waveform.path.ecg")
+                    Label("Runalyzer", systemImage: "waveform.path.ecg")
                 }
 
-            SessionListView()
-                .tabItem {
-                    Label("History", systemImage: "clock.arrow.circlepath")
-                }
-
-            ScaleDashboardView()
+            BodyTab()
                 .tabItem {
                     Label("Body", systemImage: "scalemass")
+                }
+
+            DataTab()
+                .tabItem {
+                    Label("Data", systemImage: "cylinder.split.1x2")
                 }
 
             HealthView()

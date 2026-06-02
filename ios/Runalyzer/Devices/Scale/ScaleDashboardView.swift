@@ -4,9 +4,7 @@ struct ScaleDashboardView: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var measurementStore: MeasurementStore
 
-    private var scale: QNScaleDriver? {
-        coordinator.activeDrivers.values.first(where: { $0 is QNScaleDriver }) as? QNScaleDriver
-    }
+    private var scale: QNScaleDriver? { coordinator.scaleDriver }
 
     var body: some View {
         NavigationStack {
@@ -119,7 +117,7 @@ struct ScaleDashboardView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("RECENT MEASUREMENTS").font(.caption2).foregroundColor(.gray)
 
-            let scaleEntries = measurementStore.entries(forDeviceType: "qn_scale")
+            let scaleEntries = measurementStore.measurements(ofType: .bodyComp)
             if scaleEntries.isEmpty {
                 Text("No measurements yet").font(.caption).foregroundColor(.gray).padding()
             } else {

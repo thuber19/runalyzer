@@ -106,6 +106,10 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
 
     func didUpdateValue(for characteristic: CBCharacteristic) {
         guard let data = characteristic.value else { return }
+        // Debug: log which characteristic updated
+        if characteristic.uuid != imuCharUUID {
+            print("IMU didUpdateValue: \(characteristic.uuid) (\(data.count) bytes)")
+        }
         switch characteristic.uuid {
         case imuCharUUID:
             if let pkt = parseIMUPacket(data) { onPacket?(pkt) }
@@ -185,7 +189,11 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     // MARK: - Private: Commands
 
     private func sendCommand(_ cmd: UInt8) {
-        guard let char = controlChar else { return }
+        guard let char = controlChar else {
+            print("IMU: sendCommand(\(cmd)) FAILED — controlChar is nil")
+            return
+        }
+        print("IMU: sendCommand(\(cmd))")
         peripheral.writeValue(Data([cmd]), for: char, type: .withResponse)
     }
 
@@ -198,6 +206,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
         expectedDownloadCount = deviceStatus.sampleCount
         downloadProgress = 0
         appState = .downloading
+        print("IMU: startDownload — \(expectedDownloadCount) samples")
         sendCommand(4)
         resetDownloadTimeout()
     }
@@ -295,6 +304,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     }
 
     private func reconcileState() {
+        print("IMU reconcile: device=\(deviceStatus.state) appState=\(appState) controlChar=\(controlChar != nil) downloadChar=\(downloadChar != nil)")
         switch deviceStatus.state {
         case .recording:
             appState = .recording

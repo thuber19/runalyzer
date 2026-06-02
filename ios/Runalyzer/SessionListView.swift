@@ -4,12 +4,14 @@ import HealthKit
 
 struct SessionListView: View {
     @EnvironmentObject var sessions: SessionStore
-    @EnvironmentObject var ble: BLEManager
+    @EnvironmentObject var coordinator: DeviceCoordinator
+
+    private var imu: IMUSensorDriver? { coordinator.imuDriver }
 
     var body: some View {
         NavigationStack {
             Group {
-                if sessions.sessions.isEmpty && ble.appState != .downloading {
+                if sessions.sessions.isEmpty && imu?.appState != .downloading {
                     VStack(spacing: 12) {
                         Image(systemName: "figure.run")
                             .font(.system(size: 48))
@@ -24,16 +26,16 @@ struct SessionListView: View {
                 } else {
                     List {
                         // Show active download at top of list
-                        if ble.appState == .downloading {
+                        if imu?.appState == .downloading {
                             HStack {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text("Downloading session...")
                                         .font(.headline)
-                                    ProgressView(value: ble.downloadProgress)
+                                    ProgressView(value: imu?.downloadProgress ?? 0)
                                         .tint(.cyan)
                                 }
                                 Spacer()
-                                Text("\(Int(ble.downloadProgress * 100))%")
+                                Text("\(Int(imu?.downloadProgress ?? 0 * 100))%")
                                     .font(.title3.monospacedDigit())
                                     .foregroundColor(.cyan)
                             }
