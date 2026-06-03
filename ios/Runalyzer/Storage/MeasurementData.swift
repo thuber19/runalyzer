@@ -43,6 +43,8 @@ struct MeasurementSource: Codable, Identifiable {
 // MARK: - Measurement (one recording, one weigh-in, one derived score)
 
 struct SensorMeasurement: Codable, Identifiable {
+    static let currentVersion = 1
+
     let id: UUID
     let date: Date
     let type: MeasurementType
@@ -57,6 +59,8 @@ struct SensorMeasurement: Codable, Identifiable {
 
     // Dense raw data (stored separately for performance)
     var rawDataFiles: [String]          // filenames: "imu_samples_xxx.json", etc.
+
+    var modelVersion: Int = Self.currentVersion
 
     // Convenience
     var summary: String {
@@ -95,6 +99,33 @@ struct SensorMeasurement: Codable, Identifiable {
         case .bodyComp: return "scalemass"
         case .derived: return "function"
         }
+    }
+
+    init(id: UUID, date: Date, type: MeasurementType, sources: [MeasurementSource],
+         dataPoints: [DataPoint], rawDataFiles: [String],
+         linkedMeasurements: [UUID]? = nil, inputMeasurements: [UUID]? = nil) {
+        self.id = id; self.date = date; self.type = type; self.sources = sources
+        self.dataPoints = dataPoints; self.rawDataFiles = rawDataFiles
+        self.linkedMeasurements = linkedMeasurements; self.inputMeasurements = inputMeasurements
+        self.modelVersion = Self.currentVersion
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, type, sources, linkedMeasurements, inputMeasurements, dataPoints, rawDataFiles, modelVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = try c.decode(Date.self, forKey: .date)
+        type = try c.decode(MeasurementType.self, forKey: .type)
+        sources = try c.decode([MeasurementSource].self, forKey: .sources)
+        linkedMeasurements = try c.decodeIfPresent([UUID].self, forKey: .linkedMeasurements)
+        inputMeasurements = try c.decodeIfPresent([UUID].self, forKey: .inputMeasurements)
+        dataPoints = try c.decode([DataPoint].self, forKey: .dataPoints)
+        rawDataFiles = try c.decode([String].self, forKey: .rawDataFiles)
+        modelVersion = (try c.decodeIfPresent(Int.self, forKey: .modelVersion)) ?? 0
+        // Future migration hooks go here: if modelVersion < X { ... }
     }
 }
 

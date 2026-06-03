@@ -5,6 +5,7 @@ import Combine
 /// Index stored as JSON, raw data in separate files.
 class MeasurementStore: ObservableObject {
     @Published var measurements: [SensorMeasurement] = []
+    @Published var corruptDataDetected = false
 
     private var storageDir: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -43,7 +44,8 @@ class MeasurementStore: ObservableObject {
         // Write raw data files
         for raw in rawData {
             do {
-                try raw.data.write(to: storageDir.appendingPathComponent(raw.filename), options: .atomic)
+                try raw.data.write(to: storageDir.appendingPathComponent(raw.filename),
+                                   options: [.atomic, .completeFileProtectionUnlessOpen])
             } catch {
                 print("Failed to write raw data \(raw.filename): \(error)")
                 return false
@@ -127,7 +129,8 @@ class MeasurementStore: ObservableObject {
             // Encode raw samples
             do {
                 let rawData = try JSONEncoder().encode(samples)
-                try rawData.write(to: dir.appendingPathComponent(rawFileName), options: .atomic)
+                try rawData.write(to: dir.appendingPathComponent(rawFileName),
+                                  options: [.atomic, .completeFileProtectionUnlessOpen])
             } catch {
                 print("Failed to save IMU raw data: \(error)")
                 DispatchQueue.main.async { completion(false) }
@@ -189,7 +192,7 @@ class MeasurementStore: ObservableObject {
     private func saveIndex() -> Bool {
         do {
             let data = try JSONEncoder().encode(measurements)
-            try data.write(to: indexURL, options: .atomic)
+            try data.write(to: indexURL, options: [.atomic, .completeFileProtectionUnlessOpen])
             return true
         } catch {
             print("Failed to save measurement index: \(error)")
@@ -198,8 +201,17 @@ class MeasurementStore: ObservableObject {
     }
 
     private func loadIndex() {
-        guard let data = try? Data(contentsOf: indexURL),
-              let loaded = try? JSONDecoder().decode([SensorMeasurement].self, from: data) else { return }
-        measurements = loaded
+        guard FileManager.default.fileExists(atPath: indexURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: indexURL)
+            measurements = try JSONDecoder().decode([SensorMeasurement].self, from: data)
+        } catch {
+            // Backup corrupt file and start fresh so the app remains usable
+            let backupURL = indexURL.deletingLastPathComponent()
+                .appendingPathComponent("measurements_corrupt_\(Int(Date().timeIntervalSince1970)).json")
+            try? FileManager.default.moveItem(at: indexURL, to: backupURL)
+            measurements = []
+            corruptDataDetected = true
+        }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Scale measurement + body composition history
 struct BodyTab: View {
@@ -30,6 +31,7 @@ struct BodyTab: View {
                     withAnimation { showMeasuring = true; measureComplete = false }
                 }
                 if newState == .complete {
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                     withAnimation { measureComplete = true }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                         withAnimation { showMeasuring = false }

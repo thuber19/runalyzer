@@ -1,6 +1,7 @@
 import Foundation
 import CoreBluetooth
 import Combine
+import os
 
 /// Central coordinator for all BLE device management.
 /// Single CBCentralManager, routes to device-specific drivers.
@@ -30,11 +31,16 @@ class DeviceCoordinator: NSObject, ObservableObject {
     private var retainedPeripherals: [UUID: CBPeripheral] = [:]  // prevent ARC deallocation (C4)
     private var restoredPeripherals: [CBPeripheral] = []  // phase-1 restore buffer (C1/C2/C3)
     private var scanTimer: Timer?
+    private var reconnectAttempts: [UUID: Int] = [:]  // M6: track attempts per device
 
     private static let restoreIdentifier = "runalyzer-central"
 
     override init() {
         super.init()
+        // queue: nil → all CBCentralManagerDelegate and CBPeripheralDelegate callbacks
+        // are dispatched on the main queue. @Published mutations are therefore main-thread-safe.
+        // didUpdateValueFor adds an extra DispatchQueue.main.async to avoid blocking the BLE
+        // stack when writing the next-chunk command synchronously inside the callback.
         centralManager = CBCentralManager(
             delegate: self,
             queue: nil,
@@ -46,9 +52,10 @@ class DeviceCoordinator: NSObject, ObservableObject {
 
     func startScanning(duration: TimeInterval = 30) {
         guard centralManager.state == .poweredOn else { return }
-        // Don't clear discovered — accumulate
-        // Scan for all registered service UUIDs, plus nil to catch devices that don't advertise services
-        centralManager.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        // H4: Pass explicit service UUIDs so scanning works in the background.
+        // withServices: nil only works in foreground — background BLE delivery requires known UUIDs.
+        let serviceUUIDs = Self.registeredDevices.flatMap { $0.serviceUUIDs }
+        centralManager.scanForPeripherals(withServices: serviceUUIDs, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         isScanning = true
 
         scanTimer?.invalidate()
@@ -205,7 +212,11 @@ extension DeviceCoordinator: CBCentralManagerDelegate {
 
         // Update or add to discovered list
         if let idx = discoveredDevices.firstIndex(where: { $0.id == peripheral.identifier }) {
-            discoveredDevices[idx].rssi = RSSI.intValue
+            // M4: Only update RSSI if it changed meaningfully — suppresses pointless objectWillChange
+            // fires on every advertisement packet when signal is steady.
+            if abs(discoveredDevices[idx].rssi - RSSI.intValue) > 3 {
+                discoveredDevices[idx].rssi = RSSI.intValue
+            }
         } else {
             discoveredDevices.append(DiscoveredDevice(
                 id: peripheral.identifier,
@@ -241,6 +252,7 @@ extension DeviceCoordinator: CBCentralManagerDelegate {
         }
 
         activeDrivers[peripheral.identifier] = driver
+        reconnectAttempts.removeValue(forKey: peripheral.identifier)  // M6: reset on success
 
         // Set typed references
         if let imu = driver as? IMUSensorDriver { imuDriver = imu }
@@ -265,18 +277,30 @@ extension DeviceCoordinator: CBCentralManagerDelegate {
         if activeDrivers[id] is IMUSensorDriver { imuDriver = nil }
         if activeDrivers[id] is QNScaleDriver { scaleDriver = nil }
         activeDrivers.removeValue(forKey: id)
-        driverCancellables.removeValue(forKey: id)  // M5: clean up forwarding
+        driverCancellables.removeValue(forKey: id)
 
         if let idx = discoveredDevices.firstIndex(where: { $0.id == id }) {
             discoveredDevices[idx].isConnected = false
         }
 
-        // M6: Direct reconnect instead of scanning
+        // M6: Exponential backoff reconnect with a hard retry cap.
+        // Attempt 1→1s, 2→2s, 3→4s … capped at 30s. After 10 attempts, give up.
         if registry.shouldAutoConnect(id) {
-            retainedPeripherals[id] = peripheral  // keep reference alive
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-                guard let self, self.centralManager.state == .poweredOn else { return }
-                self.centralManager.connect(peripheral, options: nil)
+            let attempt = (reconnectAttempts[id] ?? 0) + 1
+            reconnectAttempts[id] = attempt
+
+            if attempt <= 10 {
+                let delay = min(pow(2.0, Double(attempt - 1)), 30.0)
+                retainedPeripherals[id] = peripheral
+                AppLogger.ble.info("Scheduling reconnect for \(id), attempt \(attempt)/10 in \(delay, format: .fixed(precision: 0))s")
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let self, self.centralManager.state == .poweredOn else { return }
+                    self.centralManager.connect(peripheral, options: nil)
+                }
+            } else {
+                AppLogger.ble.warning("Giving up reconnect for \(id) after 10 attempts")
+                reconnectAttempts.removeValue(forKey: id)
+                retainedPeripherals.removeValue(forKey: id)
             }
         } else {
             retainedPeripherals.removeValue(forKey: id)
@@ -288,13 +312,28 @@ extension DeviceCoordinator: CBCentralManagerDelegate {
 
 extension DeviceCoordinator: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let driver = activeDrivers[peripheral.identifier] else { return }
-        driver.didDiscoverServices()
+        // Defensive main-thread dispatch: queue is nil (main) but explicit to guard against
+        // future queue changes silently breaking @Published mutations inside drivers.
+        DispatchQueue.main.async {
+            guard let driver = self.activeDrivers[peripheral.identifier] else { return }
+            // H2: Surface discovery errors to the driver's connectionState instead of silently ignoring.
+            if let error = error {
+                driver.connectionState = .error("Service discovery failed: \(error.localizedDescription)")
+                return
+            }
+            driver.didDiscoverServices()
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard let driver = activeDrivers[peripheral.identifier] else { return }
-        driver.didDiscoverCharacteristics(for: service)
+        DispatchQueue.main.async {
+            guard let driver = self.activeDrivers[peripheral.identifier] else { return }
+            if let error = error {
+                driver.connectionState = .error("Characteristic discovery failed: \(error.localizedDescription)")
+                return
+            }
+            driver.didDiscoverCharacteristics(for: service)
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -308,9 +347,9 @@ extension DeviceCoordinator: CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        // H5: Log write errors for debugging
-        if let error {
-            print("BLE write error on \(characteristic.uuid): \(error.localizedDescription)")
+        // Rec 2: Route write errors to the driver so it can surface them in the UI.
+        if let error, let driver = activeDrivers[peripheral.identifier] {
+            driver.didWriteError(error, for: characteristic)
         }
     }
 }
@@ -318,16 +357,11 @@ extension DeviceCoordinator: CBPeripheralDelegate {
 // MARK: - Helpers
 
 extension DeviceCoordinator {
-    /// M5: Per-driver objectWillChange forwarding, stored per device ID so it's cleaned on disconnect.
+    /// Rec 3: Generic per-driver objectWillChange forwarding via observeChanges().
+    /// No type-switching — works for any conforming DeviceDriver automatically.
     private func forwardDriverChanges(_ driver: any DeviceDriver, id: UUID) {
-        if let imu = driver as? IMUSensorDriver {
-            driverCancellables[id] = imu.objectWillChange.sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-        } else if let scale = driver as? QNScaleDriver {
-            driverCancellables[id] = scale.objectWillChange.sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
+        driverCancellables[id] = driver.observeChanges().sink { [weak self] in
+            self?.objectWillChange.send()
         }
     }
 }

@@ -21,16 +21,24 @@ struct UserProfile: Codable, Equatable {
 
     static let `default` = UserProfile(heightCm: 175, age: 30, sex: .male)
 
-    private static let key = "runalyzer_user_profile"
+    private static let keychainKey = "user_profile"
+    private static let legacyDefaultsKey = "runalyzer_user_profile"  // migration only
 
     func save() {
         if let data = try? JSONEncoder().encode(self) {
-            UserDefaults.standard.set(data, forKey: Self.key)
+            Keychain.save(data, key: Self.keychainKey)
         }
     }
 
     static func load() -> UserProfile {
-        guard let data = UserDefaults.standard.data(forKey: key),
+        // One-time migration from UserDefaults → Keychain
+        if Keychain.load(key: keychainKey) == nil,
+           let legacyData = UserDefaults.standard.data(forKey: legacyDefaultsKey) {
+            Keychain.save(legacyData, key: keychainKey)
+            UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
+        }
+
+        guard let data = Keychain.load(key: keychainKey),
               let profile = try? JSONDecoder().decode(UserProfile.self, from: data) else {
             return .default
         }

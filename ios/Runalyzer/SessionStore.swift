@@ -4,6 +4,8 @@ import Combine
 // RecordedSample, IMUDeviceEvent (DeviceEvent) are defined in IMUDataTypes.swift
 
 struct RunSession: Identifiable, Codable {
+    static let currentVersion = 1
+
     let id: UUID
     var date: Date
     var endDate: Date?
@@ -14,6 +16,37 @@ struct RunSession: Identifiable, Codable {
     var linkedWorkoutID: String?
     var events: [IMUDeviceEvent]?  // event log from device
     var samplesFileName: String
+    var modelVersion: Int = Self.currentVersion
+
+    private enum CodingKeys: String, CodingKey {
+        case id, date, endDate, duration, sampleCount, avgCadence, totalSteps
+        case linkedWorkoutID, events, samplesFileName, modelVersion
+    }
+
+    init(id: UUID, date: Date, endDate: Date? = nil, duration: TimeInterval, sampleCount: Int,
+         avgCadence: Int, totalSteps: Int? = nil, linkedWorkoutID: String? = nil,
+         events: [IMUDeviceEvent]? = nil, samplesFileName: String) {
+        self.id = id; self.date = date; self.endDate = endDate; self.duration = duration
+        self.sampleCount = sampleCount; self.avgCadence = avgCadence; self.totalSteps = totalSteps
+        self.linkedWorkoutID = linkedWorkoutID; self.events = events; self.samplesFileName = samplesFileName
+        self.modelVersion = Self.currentVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        date = try c.decode(Date.self, forKey: .date)
+        endDate = try c.decodeIfPresent(Date.self, forKey: .endDate)
+        duration = try c.decode(TimeInterval.self, forKey: .duration)
+        sampleCount = try c.decode(Int.self, forKey: .sampleCount)
+        avgCadence = try c.decode(Int.self, forKey: .avgCadence)
+        totalSteps = try c.decodeIfPresent(Int.self, forKey: .totalSteps)
+        linkedWorkoutID = try c.decodeIfPresent(String.self, forKey: .linkedWorkoutID)
+        events = try c.decodeIfPresent([IMUDeviceEvent].self, forKey: .events)
+        samplesFileName = try c.decode(String.self, forKey: .samplesFileName)
+        modelVersion = (try c.decodeIfPresent(Int.self, forKey: .modelVersion)) ?? 0
+        // Future migration hooks go here: if modelVersion < X { ... }
+    }
 
     private static let fmt: DateFormatter = {
         let f = DateFormatter()
@@ -33,6 +66,7 @@ struct RunSession: Identifiable, Codable {
 
 class SessionStore: ObservableObject {
     @Published var sessions: [RunSession] = []
+    @Published var corruptDataDetected = false
 
     private var storageDir: URL {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -99,7 +133,8 @@ class SessionStore: ObservableObject {
             // Save samples file
             do {
                 let data = try JSONEncoder().encode(samples)
-                try data.write(to: dir.appendingPathComponent(fileName), options: .atomic)
+                try data.write(to: dir.appendingPathComponent(fileName),
+                               options: [.atomic, .completeFileProtectionUnlessOpen])
             } catch {
                 print("FAILED to save samples: \(error)")
                 DispatchQueue.main.async { completion(false) }
@@ -183,7 +218,7 @@ class SessionStore: ObservableObject {
     private func saveSessions() -> Bool {
         do {
             let data = try JSONEncoder().encode(sessions)
-            try data.write(to: sessionsURL, options: .atomic)
+            try data.write(to: sessionsURL, options: [.atomic, .completeFileProtectionUnlessOpen])
             return true
         } catch {
             print("ERROR: failed to save sessions index: \(error)")
@@ -192,8 +227,17 @@ class SessionStore: ObservableObject {
     }
 
     private func loadSessions() {
-        guard let data = try? Data(contentsOf: sessionsURL),
-              let loaded = try? JSONDecoder().decode([RunSession].self, from: data) else { return }
-        sessions = loaded
+        guard FileManager.default.fileExists(atPath: sessionsURL.path) else { return }
+        do {
+            let data = try Data(contentsOf: sessionsURL)
+            sessions = try JSONDecoder().decode([RunSession].self, from: data)
+        } catch {
+            // Backup corrupt file and start fresh so the app remains usable
+            let backupURL = sessionsURL.deletingLastPathComponent()
+                .appendingPathComponent("sessions_corrupt_\(Int(Date().timeIntervalSince1970)).json")
+            try? FileManager.default.moveItem(at: sessionsURL, to: backupURL)
+            sessions = []
+            corruptDataDetected = true
+        }
     }
 }

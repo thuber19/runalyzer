@@ -1,6 +1,8 @@
 import Foundation
 import CoreBluetooth
 import Combine
+import os
+import UIKit
 
 /// Driver for the Runalyzer IMU gait sensor.
 /// Handles the full BLE protocol: time sync, recording control, status parsing, download.
@@ -53,6 +55,9 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     private var downloadTimeoutTimer: Timer?
     private var downloadRetryCount = 0
     private var firstStatusReceived = false
+
+    // M9: background task token to keep download alive when app is backgrounded
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     // MARK: - Persisted state
 
@@ -127,17 +132,33 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
         }
     }
 
+    func observeChanges() -> AnyPublisher<Void, Never> {
+        objectWillChange.map { _ in () }.eraseToAnyPublisher()
+    }
+
+    func didWriteError(_ error: Error, for characteristic: CBCharacteristic) {
+        AppLogger.imu.error("write error on \(characteristic.uuid): \(error.localizedDescription)")
+        if characteristic.uuid == controlCharUUID && appState == .downloading {
+            appState = .error("BLE write failed: \(error.localizedDescription)")
+        }
+    }
+
     func didDisconnect() {
         controlChar = nil; statusChar = nil; downloadChar = nil
         configChar = nil; timesyncChar = nil
         downloadTimeoutTimer?.invalidate()
+        endBackgroundTask()  // M9: always clean up on disconnect
 
         let previousState = appState
         if previousState == .downloading {
+            // C7: Surface error instead of silently discarding — user sees "Download interrupted"
+            // rather than the UI just going blank. New driver is created on reconnect so this
+            // error state does not persist.
             downloadedSamples.removeAll()
+            downloadedEvents.removeAll()
             downloadProgress = 0
-        }
-        if previousState != .recording {
+            appState = .error("Download interrupted — reconnect to retry")
+        } else if previousState != .recording {
             appState = .disconnected
         }
     }
@@ -190,14 +211,14 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
 
     private func sendCommand(_ cmd: UInt8) {
         guard peripheral.state == .connected else {  // H2
-            print("IMU: sendCommand(\(cmd)) FAILED — peripheral not connected")
+            AppLogger.imu.warning("sendCommand(\(cmd)) — peripheral not connected")
             return
         }
         guard let char = controlChar else {
-            print("IMU: sendCommand(\(cmd)) FAILED — controlChar is nil")
+            AppLogger.imu.warning("sendCommand(\(cmd)) — controlChar is nil")
             return
         }
-        print("IMU: sendCommand(\(cmd))")
+        AppLogger.imu.debug("sendCommand(\(cmd))")
         peripheral.writeValue(Data([cmd]), for: char, type: .withResponse)
     }
 
@@ -210,9 +231,26 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
         expectedDownloadCount = deviceStatus.sampleCount
         downloadProgress = 0
         appState = .downloading
-        print("IMU: startDownload — \(expectedDownloadCount) samples")
+        AppLogger.imu.info("startDownload — \(self.expectedDownloadCount) samples")
+
+        // M9: Request extra background time so a download that starts while the app is
+        // visible can survive the user backgrounding mid-transfer.
+        if backgroundTaskID == .invalid {
+            backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "IMU Download") { [weak self] in
+                // Expiration handler — iOS is about to suspend us; mark the download interrupted.
+                AppLogger.imu.warning("background task expired mid-download")
+                self?.endBackgroundTask()
+            }
+        }
+
         sendCommand(4)
         resetDownloadTimeout()
+    }
+
+    private func endBackgroundTask() {
+        guard backgroundTaskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        backgroundTaskID = .invalid
     }
 
     private func requestNextChunk() {
@@ -225,15 +263,16 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
         downloadTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
             guard let self, self.appState == .downloading else { return }
             self.downloadRetryCount += 1
-            print("IMU: download timeout, retry \(self.downloadRetryCount)/5")
+            AppLogger.imu.warning("download timeout, retry \(self.downloadRetryCount)/5")
             if self.downloadRetryCount < 5 {
                 self.requestNextChunk()
             } else {
-                print("IMU: download failed after 5 retries")
+                AppLogger.imu.error("download failed after 5 retries")
                 self.downloadedSamples.removeAll()
                 self.downloadedEvents.removeAll()
                 self.downloadRetryCount = 0
                 self.appState = .idle
+                self.endBackgroundTask()  // M9: download failed
             }
         }
     }
@@ -310,7 +349,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     }
 
     private func reconcileState() {
-        print("IMU reconcile: device=\(deviceStatus.state) appState=\(appState) controlChar=\(controlChar != nil) downloadChar=\(downloadChar != nil)")
+        AppLogger.imu.info("reconcile: device=\(String(describing: self.deviceStatus.state)) appState=\(String(describing: self.appState))")
         switch deviceStatus.state {
         case .recording:
             appState = .recording
@@ -341,6 +380,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
             onDownloadComplete?(samples, status, evts)
             downloadedSamples.removeAll()
             downloadedEvents.removeAll()
+            endBackgroundTask()  // M9: download complete
             return
         }
 
@@ -348,7 +388,11 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
         if data.count >= 5 {
             let marker = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 0, as: UInt32.self) }
             if marker == 0xFFFFFFFE {
-                let count = Int(data[4])
+                // C6: Cap count to what the packet can actually contain, preventing unnecessary
+                // iteration on malformed/truncated BLE payloads from untrusted device.
+                let rawCount = Int(data[4])
+                let maxPossible = max(0, (data.count - 5) / 5)
+                let count = min(rawCount, maxPossible)
                 downloadedEvents.removeAll()
                 for i in 0..<count {
                     let off = 5 + (i * 5)

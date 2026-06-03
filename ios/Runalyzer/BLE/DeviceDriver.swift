@@ -57,6 +57,15 @@ protocol DeviceDriver: AnyObject, ObservableObject {
     /// Called when the peripheral disconnects.
     func didDisconnect()
 
+    /// Called when a write to a characteristic fails. Rec 2: surfaces write errors through
+    /// the driver so views can show actionable feedback rather than silent log lines.
+    func didWriteError(_ error: Error, for characteristic: CBCharacteristic)
+
+    /// Returns a type-erased publisher that fires whenever the driver's state changes.
+    /// Rec 3: allows DeviceCoordinator to forward objectWillChange generically without
+    /// type-switching for each device kind.
+    func observeChanges() -> AnyPublisher<Void, Never>
+
     // --- Events ---
 
     /// Publisher that emits driver events.

@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import HealthKit
+import os
 
 struct AppleWorkout: Identifiable {
     let id: UUID
@@ -95,20 +96,19 @@ class HealthKitManager: ObservableObject {
 
     @Published var authorized = false
     @Published var workouts: [AppleWorkout] = []
+    @Published var isLoadingWorkouts = false  // M3: distinguish "loading" from "empty"
 
     // M4: cache to avoid redundant queries
     private var lastWorkoutFetch: Date?
 
+    // H1: Only request types we actually query. Requesting unused types (runningSpeed,
+    // strideLength, verticalOscillation, groundContactTime) prompts unnecessary permissions.
     private let readTypes: Set<HKObjectType> = {
         var types = Set<HKObjectType>()
         types.insert(HKQuantityType.quantityType(forIdentifier: .heartRate)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .stepCount)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .runningSpeed)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .runningStrideLength)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .runningVerticalOscillation)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .runningGroundContactTime)!)
         types.insert(HKObjectType.workoutType())
         return types
     }()
@@ -137,19 +137,19 @@ class HealthKitManager: ObservableObject {
         // M4: skip if fetched within last 30 seconds
         if !force, let last = lastWorkoutFetch, Date().timeIntervalSince(last) < 30 { return }
         lastWorkoutFetch = Date()
+        isLoadingWorkouts = true
         let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
         let query = HKSampleQuery(
             sampleType: HKObjectType.workoutType(),
             predicate: nil,
             limit: 50,
             sortDescriptors: [sort]
-        ) { _, results, error in
-            print("Workout query returned \(results?.count ?? 0) results, error: \(String(describing: error))")
-            let workouts = (results as? [HKWorkout] ?? []).map { w in
-                AppleWorkout(id: w.uuid, workout: w)
-            }
+        ) { [weak self] _, results, error in
+            if let error { AppLogger.health.error("Workout query error: \(error.localizedDescription)") }
+            let workouts = (results as? [HKWorkout] ?? []).map { AppleWorkout(id: $0.uuid, workout: $0) }
             DispatchQueue.main.async {
-                self.workouts = workouts
+                self?.workouts = workouts
+                self?.isLoadingWorkouts = false
             }
         }
         store.execute(query)

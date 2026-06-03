@@ -112,7 +112,11 @@ struct HealthView: View {
                 Text("\(healthKit.workouts.count)").font(.caption).foregroundColor(.gray)
             }
 
-            if healthKit.workouts.isEmpty {
+            if healthKit.isLoadingWorkouts {
+                ProgressView("Loading workouts...")
+                    .padding()
+                    .foregroundColor(.gray)
+            } else if healthKit.workouts.isEmpty {
                 Text("No workouts found")
                     .font(.subheadline).foregroundColor(.gray)
                     .padding()

@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import UIKit
 
 struct LiveDashboardView: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
@@ -48,6 +49,10 @@ struct LiveDashboardView: View {
         .padding()
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(isConnected
+            ? "IMU sensor connected, battery \(imu?.deviceStatus.batteryPercent ?? 0) percent"
+            : "IMU sensor not connected, scanning")
     }
 
     // MARK: - Recording Controls
@@ -65,6 +70,7 @@ struct LiveDashboardView: View {
                 case .disconnected, .idle:
                     let hasUnsynced = imu?.deviceStatus.state == .hasData && (imu?.deviceStatus.sampleCount ?? 0) > 0
                     Button(action: {
+                        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                         metrics.reset()
                         imu?.startRecording()
                     }) {
@@ -75,6 +81,9 @@ struct LiveDashboardView: View {
                             .foregroundColor(.white).cornerRadius(12)
                     }
                     .disabled(!isConnected || hasUnsynced)
+                    .accessibilityLabel(hasUnsynced
+                        ? "Start recording, disabled — previous session not yet synced"
+                        : "Start recording")
 
                     if hasUnsynced {
                         Text("Previous session not synced yet. Waiting for download...")
@@ -92,12 +101,16 @@ struct LiveDashboardView: View {
                             Text("\(imu?.deviceStatus.sampleCount ?? 0) samples")
                                 .font(.caption.monospacedDigit()).foregroundColor(.gray)
                         }
-                        Button(action: { imu?.stopRecording() }) {
+                        Button(action: {
+                            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                            imu?.stopRecording()
+                        }) {
                             Label("Stop Recording", systemImage: "stop.circle.fill")
                                 .frame(maxWidth: .infinity).padding()
                                 .background(Color.red).foregroundColor(.white).cornerRadius(12)
                         }
                         .disabled(!isConnected)
+                        .accessibilityLabel("Stop recording")
                         if !isConnected {
                             Text("Device recording independently. Reconnect to stop.")
                                 .font(.caption).foregroundColor(.orange)
@@ -126,6 +139,8 @@ struct LiveDashboardView: View {
                     }
                     .padding()
                     .background(Color.cyan.opacity(0.1)).cornerRadius(12)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Syncing session, \(Int((imu?.downloadProgress ?? 0) * 100)) percent complete")
 
                 case .error(let msg):
                     VStack(spacing: 8) {
@@ -208,5 +223,7 @@ struct MetricCard: View {
         .padding(.vertical, 12)
         .background(Color(hex: 0x16213e))
         .cornerRadius(10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(value) \(unit)")
     }
 }

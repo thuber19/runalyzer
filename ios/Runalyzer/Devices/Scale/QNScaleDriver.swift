@@ -1,6 +1,7 @@
 import Foundation
 import CoreBluetooth
 import Combine
+import os
 
 /// Driver for QN-Scale body fat scales.
 /// Implements the vendor handshake protocol and collects weight + bioimpedance readings.
@@ -29,7 +30,12 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
     @Published var scaleState: ScaleState = .idle
     @Published var liveWeight: Double = 0
     @Published var isStable = false
-    @Published var lastMeasurement: ScaleMeasurement?
+    @Published var lastMeasurement: ScaleMeasurement? {
+        didSet { persistLastMeasurement() }
+    }
+
+    // M7: persist last measurement key
+    private static let lastMeasurementKey = "runalyzer_last_scale_measurement"
 
     // MARK: - BLE
 
@@ -39,6 +45,7 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
 
     private var writeChar: CBCharacteristic?
     private var ptype: UInt8 = 0
+    private var infoTimeoutTimer: Timer?
 
     // MARK: - Measurement collection
 
@@ -58,7 +65,18 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
         self.peripheral = peripheral
         self.id = peripheral.identifier
         self.displayName = peripheral.name ?? "QN-Scale"
+        // M7: restore last measurement from UserDefaults
+        if let data = UserDefaults.standard.data(forKey: Self.lastMeasurementKey),
+           let measurement = try? JSONDecoder().decode(ScaleMeasurement.self, from: data) {
+            _lastMeasurement = Published(initialValue: measurement)
+        }
         super.init()
+    }
+
+    private func persistLastMeasurement() {
+        guard let m = lastMeasurement,
+              let data = try? JSONEncoder().encode(m) else { return }
+        UserDefaults.standard.set(data, forKey: Self.lastMeasurementKey)
     }
 
     // MARK: - DeviceDriver lifecycle
@@ -74,9 +92,20 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
             if char.uuid == notifyUUID || char.uuid == CBUUID(string: "FFF1") {
                 peripheral.setNotifyValue(true, for: char)
                 scaleState = .waitingForInfo
+                startInfoTimeout()
             } else if char.uuid == writeUUID || char.uuid == CBUUID(string: "FFF2") {
                 writeChar = char
             }
+        }
+    }
+
+    // H5: If the scale never sends its 0x12 info packet, surface an error rather than hanging.
+    private func startInfoTimeout() {
+        infoTimeoutTimer?.invalidate()
+        infoTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: false) { [weak self] _ in
+            guard let self, self.scaleState == .waitingForInfo else { return }
+            self.scaleState = .idle
+            self.connectionState = .error("Scale did not respond — try reconnecting")
         }
     }
 
@@ -96,7 +125,17 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
         }
     }
 
+    func observeChanges() -> AnyPublisher<Void, Never> {
+        objectWillChange.map { _ in () }.eraseToAnyPublisher()
+    }
+
+    func didWriteError(_ error: Error, for characteristic: CBCharacteristic) {
+        AppLogger.scale.error("write error on \(characteristic.uuid): \(error.localizedDescription)")
+    }
+
     func didDisconnect() {
+        infoTimeoutTimer?.invalidate()
+        infoTimeoutTimer = nil
         writeChar = nil
         scaleState = .idle
         stableWeights.removeAll()
@@ -106,6 +145,8 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
     // MARK: - Protocol Handlers
 
     private func handleInfo(_ data: Data) {
+        infoTimeoutTimer?.invalidate()
+        infoTimeoutTimer = nil
         // Extract ptype from frame
         if data.count > 2 {
             ptype = data[2]

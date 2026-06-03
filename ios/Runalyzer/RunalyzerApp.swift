@@ -25,103 +25,108 @@ struct RunalyzerApp: App {
                     appWiring.setup(coordinator: coordinator, metrics: metrics,
                                    store: store, sessions: sessions)
                 }
+                .alert("Data Recovery", isPresented: $store.corruptDataDetected) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("Your measurement history could not be read and has been backed up. A fresh start has been created. If this keeps happening, please contact support.")
+                }
+                .alert("Data Recovery", isPresented: $sessions.corruptDataDetected) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("Your session history could not be read and has been backed up. A fresh start has been created. If this keeps happening, please contact support.")
+                }
         }
     }
 }
 
-/// Manages Combine subscriptions and callback wiring.
+/// Manages Combine subscriptions and driver callback wiring.
+/// Rec 4: Single-loop design — adding a new device type requires only a new entry in
+/// the `handlers` dictionary inside setup(). No per-device boilerplate elsewhere.
 class AppWiring: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
-    private var scaleCancellable: AnyCancellable?
-    private var imuWired = false
-    private var scaleWired = false
+    private var wiredDriverIDs = Set<UUID>()
+    private var driverCancellables: [UUID: AnyCancellable] = [:]
 
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, sessions: SessionStore) {
 
-        // H6: Reset IMU wiring on disconnect
-        coordinator.$imuDriver
-            .filter { $0 == nil }
-            .sink { [weak self] _ in
-                self?.imuWired = false
-            }
-            .store(in: &cancellables)
+        // Per-descriptor handlers — keyed by DeviceDescriptor.id.
+        // To add a new device: add one entry here.
+        let handlers: [String: (any DeviceDriver) -> AnyCancellable?] = [
+            "imu_sensor": Self.imuHandler(metrics: metrics, store: store, sessions: sessions),
+            "qn_scale":   Self.scaleHandler(store: store)
+        ]
 
-        // Wire IMU driver when it connects
-        coordinator.$imuDriver
-            .compactMap { $0 }
-            .sink { [weak self, weak metrics, weak store, weak sessions] imu in
-                self?.wireIMU(imu, metrics: metrics, store: store, sessions: sessions)
-            }
-            .store(in: &cancellables)
+        coordinator.$activeDrivers
+            .sink { [weak self] drivers in
+                guard let self else { return }
+                let activeIDs = Set(drivers.keys)
 
-        // Reset scale wiring on disconnect
-        coordinator.$scaleDriver
-            .filter { $0 == nil }
-            .sink { [weak self] _ in
-                self?.scaleWired = false
-                self?.scaleCancellable = nil
-            }
-            .store(in: &cancellables)
-
-        // Wire Scale driver when it connects (once only)
-        coordinator.$scaleDriver
-            .compactMap { $0 }
-            .sink { [weak self, weak store] (scale: QNScaleDriver) in
-                guard let self, !self.scaleWired else { return }
-                self.scaleWired = true
-                self.scaleCancellable = scale.events
-                    .receive(on: DispatchQueue.main)
-                    .sink { event in
-                        if case .measurementReady(let m) = event,
-                           let result = m as? ScaleMeasurement {
-                            let source = MeasurementSource.device(
-                                type: "qn_scale",
-                                name: scale.displayName,
-                                serial: scale.id.uuidString
-                            )
-                            store?.saveBodyComp(scaleMeasurement: result, source: source)
-                        }
+                // Wire newly connected drivers
+                for (id, driver) in drivers where !self.wiredDriverIDs.contains(id) {
+                    self.wiredDriverIDs.insert(id)
+                    if let handler = handlers[driver.descriptor.id],
+                       let cancellable = handler(driver) {
+                        self.driverCancellables[id] = cancellable
                     }
+                }
+
+                // Clean up disconnected drivers
+                for id in self.wiredDriverIDs where !activeIDs.contains(id) {
+                    self.wiredDriverIDs.remove(id)
+                    self.driverCancellables.removeValue(forKey: id)
+                }
             }
             .store(in: &cancellables)
     }
 
-    private func wireIMU(_ imu: IMUSensorDriver, metrics: RunMetrics?,
-                         store: MeasurementStore?, sessions: SessionStore?) {
-        guard !imuWired else { return }
-        imuWired = true
+    // MARK: - Wiring factories
 
-        imu.onPacket = { [weak metrics] packet in
-            metrics?.process(packet)
-        }
-        print("IMU wired: onPacket set")
+    private static func imuHandler(metrics: RunMetrics, store: MeasurementStore, sessions: SessionStore)
+        -> (any DeviceDriver) -> AnyCancellable? {
+        { [weak metrics, weak store, weak sessions] driver in
+            guard let imu = driver as? IMUSensorDriver else { return nil }
+            imu.onPacket = { [weak metrics] packet in metrics?.process(packet) }
+            imu.onDownloadComplete = { [weak store, weak sessions, weak imu] samples, status, events in
+                let source = MeasurementSource.device(
+                    type: "imu_sensor",
+                    name: imu?.displayName ?? "Runalyzer IMU",
+                    serial: imu?.id.uuidString
+                )
+                store?.saveIMUSession(
+                    samples: samples, sampleRateHz: Int(status.sampleRateHz),
+                    durationSec: Double(status.recordingDurationSec),
+                    startUnixMs: status.recordingStartUnixMs,
+                    events: events.isEmpty ? nil : events, source: source
+                ) { saved in if saved { imu?.eraseData() } }
 
-        imu.onDownloadComplete = { [weak store, weak sessions, weak imu] samples, status, events in
-            let source = MeasurementSource.device(
-                type: "imu_sensor",
-                name: imu?.displayName ?? "Runalyzer IMU",
-                serial: imu?.id.uuidString
-            )
-
-            // Save to new unified store
-            store?.saveIMUSession(
-                samples: samples, sampleRateHz: Int(status.sampleRateHz),
-                durationSec: Double(status.recordingDurationSec),
-                startUnixMs: status.recordingStartUnixMs,
-                events: events.isEmpty ? nil : events,
-                source: source
-            ) { saved in
-                if saved { imu?.eraseData() }
+                sessions?.saveDownloadedSession(
+                    samples: samples, sampleRateHz: Int(status.sampleRateHz),
+                    durationSec: Double(status.recordingDurationSec),
+                    startUnixMs: status.recordingStartUnixMs,
+                    events: events.isEmpty ? nil : events
+                ) { _ in }
             }
+            return nil  // callback-based wiring; no Combine subscription to track
+        }
+    }
 
-            // Also save to legacy SessionStore for backward compat
-            sessions?.saveDownloadedSession(
-                samples: samples, sampleRateHz: Int(status.sampleRateHz),
-                durationSec: Double(status.recordingDurationSec),
-                startUnixMs: status.recordingStartUnixMs,
-                events: events.isEmpty ? nil : events
-            ) { _ in }
+    private static func scaleHandler(store: MeasurementStore) -> (any DeviceDriver) -> AnyCancellable? {
+        { [weak store] driver in
+            guard let scale = driver as? QNScaleDriver else { return nil }
+            return scale.events
+                .receive(on: DispatchQueue.main)
+                .sink { event in
+                    if case .measurementReady(let m) = event,
+                       let result = m as? ScaleMeasurement {
+                        let source = MeasurementSource.device(
+                            type: "qn_scale",
+                            name: scale.displayName,
+                            serial: scale.id.uuidString
+                        )
+                        store?.saveBodyComp(scaleMeasurement: result, source: source)
+                    }
+                }
         }
     }
 }
