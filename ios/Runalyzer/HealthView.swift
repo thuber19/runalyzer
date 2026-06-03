@@ -208,6 +208,7 @@ struct HealthView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
+            .background(Color(hex: 0x1a1a2e))
             .navigationTitle("Health Data")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

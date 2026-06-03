@@ -7,6 +7,7 @@ struct AlgorithmsView: View {
                 Text("Runalyzer uses published scientific equations to derive health metrics from raw sensor data. Below are the algorithms, their sources, and what they calculate.")
                     .font(.caption)
                     .foregroundColor(.gray)
+                    .listRowBackground(Color(hex: 0x16213e))
             }
 
             // Body Composition
@@ -142,8 +143,11 @@ struct AlgorithmsView: View {
                     .font(.caption)
                     .foregroundColor(.gray)
                 }
+                .listRowBackground(Color(hex: 0x16213e))
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color(hex: 0x1a1a2e))
         .navigationTitle("Algorithms")
     }
 }
@@ -200,5 +204,6 @@ struct AlgorithmCard: View {
                 .padding(.top, 4)
             }
         }
+        .listRowBackground(Color(hex: 0x16213e))
     }
 }

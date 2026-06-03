@@ -224,7 +224,7 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
     }
 
     private func writeRaw(_ bytes: [UInt8]) {
-        guard let char = writeChar else { return }
+        guard peripheral.state == .connected, let char = writeChar else { return }  // H2
         peripheral.writeValue(Data(bytes), for: char, type: .withResponse)
     }
 

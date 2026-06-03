@@ -40,6 +40,7 @@ struct SessionListView: View {
                                     .foregroundColor(.cyan)
                             }
                             .padding(.vertical, 4)
+                            .listRowBackground(Color(hex: 0x16213e))
                         }
                         ForEach(sessions.sessions) { session in
                             NavigationLink(destination: SessionDetailView(session: session)) {
@@ -64,6 +65,7 @@ struct SessionListView: View {
                                 }
                                 .padding(.vertical, 4)
                             }
+                            .listRowBackground(Color(hex: 0x16213e))
                         }
                         .onDelete { indexSet in
                             let toDelete = indexSet.map { sessions.sessions[$0] }
@@ -72,6 +74,7 @@ struct SessionListView: View {
                             }
                         }
                     }
+                    .scrollContentBackground(.hidden)
                 }
             }
             .background(Color(hex: 0x1a1a2e))
@@ -616,6 +619,8 @@ struct WorkoutPickerView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(hex: 0x1a1a2e))
             .navigationTitle("Select Workout")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -686,6 +691,7 @@ struct WorkoutPickerView: View {
             }
             .padding(.vertical, 4)
         }
+        .listRowBackground(Color(hex: 0x16213e))
     }
 
     private func iconFor(_ type: HKWorkoutActivityType) -> String {

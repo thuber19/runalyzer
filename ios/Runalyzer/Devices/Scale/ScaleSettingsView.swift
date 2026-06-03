@@ -16,6 +16,7 @@ struct ScaleSettingsView: View {
                         .frame(width: 80)
                     Text("cm").foregroundColor(.gray)
                 }
+                .listRowBackground(Color(hex: 0x16213e))
 
                 HStack {
                     Text("Age")
@@ -26,12 +27,14 @@ struct ScaleSettingsView: View {
                         .frame(width: 80)
                     Text("years").foregroundColor(.gray)
                 }
+                .listRowBackground(Color(hex: 0x16213e))
 
                 Picker("Sex", selection: $profile.sex) {
                     ForEach(UserProfile.Sex.allCases, id: \.self) { sex in
                         Text(sex.label).tag(sex)
                     }
                 }
+                .listRowBackground(Color(hex: 0x16213e))
             }
 
             Section {
@@ -48,10 +51,13 @@ struct ScaleSettingsView: View {
                         }
                     }
                 }
+                .listRowBackground(Color(hex: 0x16213e))
             } footer: {
                 Text("These values are used to calculate body fat, muscle mass, and other metrics from the scale's impedance measurement.")
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color(hex: 0x1a1a2e))
         .navigationTitle("Body Profile")
     }
 }

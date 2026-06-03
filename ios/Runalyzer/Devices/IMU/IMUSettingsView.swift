@@ -32,6 +32,7 @@ struct IMUSettingsView: View {
                         .tint(Color(hex: 0xe94560))
                         .disabled(imu.appState != .idle)
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
 
                 // Device Info
@@ -54,6 +55,7 @@ struct IMUSettingsView: View {
                         Text("\(status.batteryPercent)%")
                             .foregroundColor(status.batteryPercent < 20 ? .red : .green)
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
 
                     infoRow("Time Synced", status.isTimeSynced ? "Yes" : "No")
                 }
@@ -75,15 +77,19 @@ struct IMUSettingsView: View {
                         Label("Erase Device Data", systemImage: "trash")
                     }
                     .disabled(imu.appState == .recording || imu.appState == .downloading)
+                    .listRowBackground(Color(hex: 0x16213e))
                 } footer: {
                     Text("Permanently deletes all recorded data from the device flash.")
                 }
             } else {
                 Section {
                     Text("IMU sensor not connected").foregroundColor(.gray)
+                        .listRowBackground(Color(hex: 0x16213e))
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color(hex: 0x1a1a2e))
         .navigationTitle("IMU Settings")
         .onAppear {
             selectedRate = Double(imu?.deviceStatus.sampleRateHz ?? 25)
@@ -102,5 +108,6 @@ struct IMUSettingsView: View {
             Spacer()
             Text(value).foregroundColor(.gray)
         }
+        .listRowBackground(Color(hex: 0x16213e))
     }
 }

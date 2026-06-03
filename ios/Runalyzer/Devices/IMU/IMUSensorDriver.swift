@@ -172,7 +172,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     }
 
     func syncTime() {
-        guard let char = timesyncChar else { return }
+        guard peripheral.state == .connected, let char = timesyncChar else { return }  // H2
         let unixMs = UInt64(Date().timeIntervalSince1970 * 1000)
         var data = Data(count: 8)
         data.withUnsafeMutableBytes { buf in
@@ -182,13 +182,17 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     }
 
     func setSampleRate(_ hz: UInt8) {
-        guard let char = configChar else { return }
+        guard peripheral.state == .connected, let char = configChar else { return }  // H2
         peripheral.writeValue(Data([hz]), for: char, type: .withResponse)
     }
 
     // MARK: - Private: Commands
 
     private func sendCommand(_ cmd: UInt8) {
+        guard peripheral.state == .connected else {  // H2
+            print("IMU: sendCommand(\(cmd)) FAILED — peripheral not connected")
+            return
+        }
         guard let char = controlChar else {
             print("IMU: sendCommand(\(cmd)) FAILED — controlChar is nil")
             return
@@ -218,12 +222,14 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
 
     private func resetDownloadTimeout() {
         downloadTimeoutTimer?.invalidate()
-        downloadTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: false) { [weak self] _ in
+        downloadTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: false) { [weak self] _ in
             guard let self, self.appState == .downloading else { return }
             self.downloadRetryCount += 1
-            if self.downloadRetryCount < 3 {
+            print("IMU: download timeout, retry \(self.downloadRetryCount)/5")
+            if self.downloadRetryCount < 5 {
                 self.requestNextChunk()
             } else {
+                print("IMU: download failed after 5 retries")
                 self.downloadedSamples.removeAll()
                 self.downloadedEvents.removeAll()
                 self.downloadRetryCount = 0

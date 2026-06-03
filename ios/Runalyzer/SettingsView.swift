@@ -11,6 +11,7 @@ struct SettingsView: View {
                     NavigationLink(destination: DeviceListView()) {
                         Label("Manage Devices", systemImage: "antenna.radiowaves.left.and.right")
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
 
                 // User Profile (for body composition)
@@ -18,6 +19,7 @@ struct SettingsView: View {
                     NavigationLink(destination: ScaleSettingsView()) {
                         Label("Body Profile", systemImage: "person.fill")
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
 
                 // Science
@@ -25,6 +27,7 @@ struct SettingsView: View {
                     NavigationLink(destination: AlgorithmsView()) {
                         Label("Algorithms & References", systemImage: "function")
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
 
                 // About
@@ -34,13 +37,17 @@ struct SettingsView: View {
                         Spacer()
                         Text("1.0").foregroundColor(.gray)
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                     HStack {
                         Text("Devices supported")
                         Spacer()
                         Text("IMU Sensor, QN Scale").foregroundColor(.gray)
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(hex: 0x1a1a2e))
             .navigationTitle("Settings")
         }
     }

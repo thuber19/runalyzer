@@ -39,6 +39,14 @@ class AppWiring: ObservableObject {
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, sessions: SessionStore) {
 
+        // H6: Reset IMU wiring on disconnect
+        coordinator.$imuDriver
+            .filter { $0 == nil }
+            .sink { [weak self] _ in
+                self?.imuWired = false
+            }
+            .store(in: &cancellables)
+
         // Wire IMU driver when it connects
         coordinator.$imuDriver
             .compactMap { $0 }
@@ -87,6 +95,7 @@ class AppWiring: ObservableObject {
         imu.onPacket = { [weak metrics] packet in
             metrics?.process(packet)
         }
+        print("IMU wired: onPacket set")
 
         imu.onDownloadComplete = { [weak store, weak sessions, weak imu] samples, status, events in
             let source = MeasurementSource.device(

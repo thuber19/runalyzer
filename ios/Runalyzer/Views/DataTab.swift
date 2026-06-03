@@ -9,6 +9,7 @@ struct DataTab: View {
             List {
                 if measurementStore.measurements.isEmpty {
                     Text("No data yet").foregroundColor(.gray)
+                        .listRowBackground(Color(hex: 0x16213e))
                 } else {
                     ForEach(measurementStore.measurements) { m in
                         NavigationLink(destination: MeasurementDetailView(measurement: m)) {
@@ -23,6 +24,7 @@ struct DataTab: View {
                                 }
                             }
                         }
+                        .listRowBackground(Color(hex: 0x16213e))
                     }
                     .onDelete { indexSet in
                         let ids = indexSet.map { measurementStore.measurements[$0].id }

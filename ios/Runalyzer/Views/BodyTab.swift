@@ -140,6 +140,7 @@ struct BodyTab: View {
             let bodyMeasurements = measurementStore.measurements(ofType: .bodyComp)
             if bodyMeasurements.isEmpty {
                 Text("No measurements yet").foregroundColor(.gray)
+                    .listRowBackground(Color(hex: 0x16213e))
             } else {
                 ForEach(bodyMeasurements) { m in
                     NavigationLink(destination: MeasurementDetailView(measurement: m)) {
@@ -152,6 +153,7 @@ struct BodyTab: View {
                             }
                         }
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
             }
         }

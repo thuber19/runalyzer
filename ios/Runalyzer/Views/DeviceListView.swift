@@ -49,13 +49,17 @@ struct DeviceListView: View {
                         ProgressView().padding(.trailing, 8)
                         Text("Scanning for devices...")
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 } else {
                     Button(action: { coordinator.startScanning() }) {
                         Label("Scan for Devices", systemImage: "antenna.radiowaves.left.and.right")
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color(hex: 0x1a1a2e))
         .navigationTitle("Devices")
         .onAppear {
             if !coordinator.isScanning {
@@ -70,7 +74,7 @@ struct DeviceListView: View {
             Button("Cancel", role: .cancel) { renameDeviceID = nil }
             Button("Save") {
                 if let id = renameDeviceID, !renameText.isEmpty {
-                    coordinator.registry.updateDisplayName(id, name: renameText)
+                    coordinator.renameDevice(id, name: renameText)
                 }
                 renameDeviceID = nil
             }
@@ -115,6 +119,7 @@ struct DeviceListView: View {
                 Circle().fill(.green).frame(width: 8, height: 8)
             }
         }
+        .listRowBackground(Color(hex: 0x16213e))
         .swipeActions(edge: .trailing) {
             Button("Disconnect") {
                 coordinator.disconnect(driver.id)
@@ -148,6 +153,7 @@ struct DeviceListView: View {
                     .font(.caption).foregroundColor(.gray)
             }
         }
+        .listRowBackground(Color(hex: 0x16213e))
         .swipeActions(edge: .trailing) {
             Button("Forget", role: .destructive) {
                 forgetDeviceID = device.id
@@ -182,5 +188,6 @@ struct DeviceListView: View {
                     .foregroundColor(.cyan)
             }
         }
+        .listRowBackground(Color(hex: 0x16213e))
     }
 }

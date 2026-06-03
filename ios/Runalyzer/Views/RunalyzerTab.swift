@@ -32,6 +32,7 @@ struct RunalyzerTab: View {
             if workouts.isEmpty {
                 Text("No recordings yet. Connect your sensor and start recording.")
                     .foregroundColor(.gray)
+                    .listRowBackground(Color(hex: 0x16213e))
             } else {
                 ForEach(workouts) { m in
                     NavigationLink(destination: MeasurementDetailView(measurement: m)) {
@@ -44,6 +45,7 @@ struct RunalyzerTab: View {
                             }
                         }
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
             }
         }
