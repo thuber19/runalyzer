@@ -30,6 +30,8 @@ struct DataTab: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Color(hex: 0x1a1a2e))
             .navigationTitle("Data")
         }
     }

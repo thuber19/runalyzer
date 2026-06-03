@@ -45,7 +45,7 @@ struct ScaleDashboardView: View {
     private var liveReading: some View {
         VStack(spacing: 8) {
             if let s = scale {
-                Text(s.liveWeight > 0 ? String(format: "%.1f", s.liveWeight) : "--.-")
+                Text(s.liveWeight > 0 ? String(format: "%.2f", s.liveWeight) : "--:--")
                     .font(.system(size: 64, weight: .bold, design: .rounded))
                     .foregroundColor(s.isStable ? Color(hex: 0x4ecca3) : .white)
                 Text("kg")
@@ -55,7 +55,7 @@ struct ScaleDashboardView: View {
                         .font(.caption).foregroundColor(.green)
                 }
             } else {
-                Text("--.-")
+                Text("--:--")
                     .font(.system(size: 64, weight: .bold, design: .rounded))
                     .foregroundColor(.gray)
                 Text("kg")
@@ -76,18 +76,23 @@ struct ScaleDashboardView: View {
         VStack(spacing: 12) {
             Text("BODY COMPOSITION").font(.caption2).foregroundColor(.gray)
 
+            if !m.hasImpedance {
+                Text("Weight only — bare feet required for body composition")                                                                                                                                                                                               
+                    .font(.caption).foregroundColor(.orange).multilineTextAlignment(.center)
+            }
+
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                compMetric(label: "Body Fat", value: String(format: "%.1f%%", m.bodyFatPercent),
+                compMetric(label: "Body Fat", value: m.bodyFatPercent.map { String(format: "%.2f%%", $0) } ?? "N/A",
                           icon: "flame.fill", color: .orange)
-                compMetric(label: "Muscle", value: String(format: "%.1f kg", m.muscleMassKg),
+                compMetric(label: "Muscle", value: m.muscleMassKg.map { String(format: "%.2f kg", $0) } ?? "N/A",
                           icon: "figure.strengthtraining.traditional", color: .blue)
-                compMetric(label: "BMI", value: String(format: "%.1f", m.bmi),
+                compMetric(label: "BMI", value: String(format: "%.2f", m.bmi),
                           icon: "heart.text.square", color: .pink)
-                compMetric(label: "Body Water", value: String(format: "%.1f%%", m.bodyWaterPercent),
+                compMetric(label: "Body Water", value: m.bodyWaterPercent.map { String(format: "%.2f%%", $0) } ?? "N/A",
                           icon: "drop.fill", color: .cyan)
-                compMetric(label: "Fat-Free Mass", value: String(format: "%.1f kg", m.fatFreeMassKg),
+                compMetric(label: "Fat-Free Mass", value: m.fatFreeMassKg.map { String(format: "%.2f kg", $0) } ?? "N/A",
                           icon: "figure.run", color: .green)
-                compMetric(label: "BMR", value: String(format: "%.0f kcal", m.bmrKcal),
+                compMetric(label: "BMR", value: m.bmrKcal.map { String(format: "%.0f kcal", $0) } ?? "N/A",
                           icon: "bolt.fill", color: .yellow)
             }
 

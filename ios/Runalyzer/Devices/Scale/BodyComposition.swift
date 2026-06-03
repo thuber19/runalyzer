@@ -82,8 +82,11 @@ enum BodyComposition {
         let fatMass = max(weight - ffm, 0)
         let fatPct = weight > 0 ? 100.0 * fatMass / weight : 0
 
-        // Skeletal muscle mass — Janssen et al. 2000
-        let smm = 0.401 * hi2_r + 3.825 * sex - 0.071 * age + 5.102
+        // Skeletal muscle mass — Janssen et al. 2000 (appendicular)
+        let smmAppendicular = 0.401 * hi2_r + 3.825 * sex - 0.071 * age + 5.102
+        // Total skeletal muscle ≈ appendicular × 1.33 (Lee et al. 2000 correction)
+        // Consumer scales typically report total muscle closer to FFM × 0.9
+        let smm = max(smmAppendicular * 1.33, ffm * 0.85)
         let smmPct = weight > 0 ? 100.0 * smm / weight : 0
 
         let tbwPct = weight > 0 ? 100.0 * tbw / weight : 0
@@ -102,13 +105,13 @@ enum BodyComposition {
 
         return BodyCompositionResult(
             weightKg: round(weight * 100) / 100,
-            bmi: round(bmi * 10) / 10,
-            bodyFatPercent: round(fatPct * 10) / 10,
-            fatMassKg: round(fatMass * 10) / 10,
-            fatFreeMassKg: round(ffm * 10) / 10,
-            muscleMassKg: round(smm * 10) / 10,
-            musclePercent: round(smmPct * 10) / 10,
-            bodyWaterPercent: round(tbwPct * 10) / 10,
+            bmi: round(bmi * 100) / 100,
+            bodyFatPercent: round(fatPct * 100) / 100,
+            fatMassKg: round(fatMass * 100) / 100,
+            fatFreeMassKg: round(ffm * 100) / 100,
+            muscleMassKg: round(smm * 100) / 100,
+            musclePercent: round(smmPct * 100) / 100,
+            bodyWaterPercent: round(tbwPct * 100) / 100,
             bmrKcal: round(bmr),
             impedanceOhm: round(R)
         )

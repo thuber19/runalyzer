@@ -167,21 +167,33 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
         } else {
             scaleState = .measuring
             isStable = false
+            // Reset finalization flag for new measurement cycle
+            if measurementFinalized {
+                measurementFinalized = false
+                stableWeights.removeAll()
+                stableImpedances.removeAll()
+                stableStartTime = nil
+            }
         }
     }
 
     // MARK: - Finalize
 
+    private var measurementFinalized = false
+
     private func finalizeMeasurement() {
-        guard !stableWeights.isEmpty else { return }
+        guard !stableWeights.isEmpty, !measurementFinalized else { return }
+        measurementFinalized = true
 
         let weight = median(stableWeights)
-        let impedance = stableImpedances.isEmpty ? 500.0 : median(stableImpedances)  // fallback if no impedance
+        let hasImpedance = !stableImpedances.isEmpty
+        let impedance = hasImpedance ? median(stableImpedances) : 0
 
         let profile = UserProfile.load()
         let measurement = ScaleMeasurement.from(
             weightKg: weight,
             impedanceOhm: impedance,
+            hasImpedance: hasImpedance,
             profile: profile,
             deviceName: displayName
         )
@@ -190,7 +202,7 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
         scaleState = .complete
 
         events.send(.measurementReady(measurement))
-        events.send(.status("Measurement complete"))
+        events.send(.status(hasImpedance ? "Measurement complete" : "Weight only — no impedance (bare feet required)"))
 
         // Reset for next measurement
         stableWeights.removeAll()

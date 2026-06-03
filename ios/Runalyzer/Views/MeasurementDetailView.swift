@@ -159,10 +159,7 @@ struct MeasurementDetailView: View {
             let m = Int(p.value) / 60, s = Int(p.value) % 60
             return String(format: "%d:%02d", m, s)
         }
-        if p.value == p.value.rounded() && p.value < 10000 {
-            return String(format: "%.0f", p.value)
-        }
-        return String(format: "%.1f", p.value)
+        return String(format: "%.2f", p.value)
     }
 
     private func shortSource(_ source: String) -> String {

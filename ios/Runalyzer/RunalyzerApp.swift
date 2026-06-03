@@ -72,19 +72,7 @@ class AppWiring: ObservableObject {
                                 name: scale.displayName,
                                 serial: scale.id.uuidString
                             )
-                            store?.saveBodyComp(
-                                weight: result.weightKg,
-                                impedance: result.impedanceOhm,
-                                result: BodyCompositionResult(
-                                    weightKg: result.weightKg, bmi: result.bmi,
-                                    bodyFatPercent: result.bodyFatPercent,
-                                    fatMassKg: result.fatMassKg, fatFreeMassKg: result.fatFreeMassKg,
-                                    muscleMassKg: result.muscleMassKg, musclePercent: result.musclePercent,
-                                    bodyWaterPercent: result.bodyWaterPercent, bmrKcal: result.bmrKcal,
-                                    impedanceOhm: result.impedanceOhm
-                                ),
-                                source: source
-                            )
+                            store?.saveBodyComp(scaleMeasurement: result, source: source)
                         }
                     }
             }

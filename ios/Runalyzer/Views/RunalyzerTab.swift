@@ -27,33 +27,28 @@ struct RunalyzerTab: View {
     }
 
     private var workoutHistory: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("WORKOUT HISTORY").font(.caption2).foregroundColor(.gray)
-
+        List {
             let workouts = measurementStore.measurements(ofType: .workout)
             if workouts.isEmpty {
                 Text("No recordings yet. Connect your sensor and start recording.")
-                    .font(.caption).foregroundColor(.gray)
-                    .padding()
+                    .foregroundColor(.gray)
             } else {
                 ForEach(workouts) { m in
                     NavigationLink(destination: MeasurementDetailView(measurement: m)) {
-                        HStack {
-                            Image(systemName: m.icon).foregroundColor(Color(hex: 0xe94560))
+                        HStack(spacing: 12) {
+                            Image(systemName: m.icon).foregroundColor(Color(hex: 0xe94560)).frame(width: 24)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(m.dateString).font(.subheadline)
                                 Text(m.summary).font(.caption).foregroundColor(.gray)
+                                Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
                             }
-                            Spacer()
-                            Text(m.sourceLabel).font(.caption2).foregroundColor(.gray)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
             }
         }
-        .padding()
-        .background(Color(hex: 0x16213e))
-        .cornerRadius(12)
+        .scrollContentBackground(.hidden)
+        .background(Color(hex: 0x1a1a2e))
+        .frame(minHeight: 200)
     }
 }

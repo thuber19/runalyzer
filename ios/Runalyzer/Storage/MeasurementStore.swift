@@ -56,24 +56,30 @@ class MeasurementStore: ObservableObject {
 
     /// Save a body composition measurement (convenience)
     @discardableResult
-    func saveBodyComp(weight: Double, impedance: Double, result: BodyCompositionResult, source: MeasurementSource) -> Bool {
-        let now = Date()
-        let dp: [DataPoint] = [
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.weight, value: weight, unit: "kg", source: source.id),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.impedance, value: impedance, unit: "Ω", source: source.id),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bmi, value: result.bmi, unit: "", source: "derived:body_comp_v1"),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bodyFatPercent, value: result.bodyFatPercent, unit: "%", source: "derived:body_comp_v1"),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.fatMassKg, value: result.fatMassKg, unit: "kg", source: "derived:body_comp_v1"),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.fatFreeMassKg, value: result.fatFreeMassKg, unit: "kg", source: "derived:body_comp_v1"),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.muscleMassKg, value: result.muscleMassKg, unit: "kg", source: "derived:body_comp_v1"),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.musclePercent, value: result.musclePercent, unit: "%", source: "derived:body_comp_v1"),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bodyWaterPercent, value: result.bodyWaterPercent, unit: "%", source: "derived:body_comp_v1"),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bmrKcal, value: result.bmrKcal, unit: "kcal", source: "derived:body_comp_v1"),
+    func saveBodyComp(scaleMeasurement m: ScaleMeasurement, source: MeasurementSource) -> Bool {
+        let now = m.date
+        var dp: [DataPoint] = [
+            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.weight, value: m.weightKg, unit: "kg", source: source.id),
+            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bmi, value: m.bmi, unit: "", source: "derived:bmi_standard"),
         ]
+
+        if m.hasImpedance {
+            dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.impedance, value: m.impedanceOhm, unit: "Ω", source: source.id))
+        }
+        if let v = m.bodyFatPercent { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bodyFatPercent, value: v, unit: "%", source: "derived:sun_et_al_2003")) }
+        if let v = m.fatMassKg { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.fatMassKg, value: v, unit: "kg", source: "derived:sun_et_al_2003")) }
+        if let v = m.fatFreeMassKg { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.fatFreeMassKg, value: v, unit: "kg", source: "derived:sun_et_al_2003")) }
+        if let v = m.muscleMassKg { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.muscleMassKg, value: v, unit: "kg", source: "derived:janssen_et_al_2000")) }
+        if let v = m.musclePercent { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.musclePercent, value: v, unit: "%", source: "derived:janssen_et_al_2000")) }
+        if let v = m.bodyWaterPercent { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bodyWaterPercent, value: v, unit: "%", source: "derived:sun_et_al_2003")) }
+        if let v = m.bmrKcal { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bmrKcal, value: v, unit: "kcal", source: "derived:mifflin_st_jeor_1990")) }
+
+        var sources = [source]
+        if m.hasImpedance { sources.append(.algorithm(name: "body_comp_v1")) }
 
         let measurement = SensorMeasurement(
             id: UUID(), date: now, type: .bodyComp,
-            sources: [source, .algorithm(name: "body_comp_v1")],
+            sources: sources,
             dataPoints: dp, rawDataFiles: []
         )
         return save(measurement)
