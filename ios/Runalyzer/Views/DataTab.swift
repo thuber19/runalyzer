@@ -15,7 +15,10 @@ struct DataTab: View {
                         NavigationLink(destination: MeasurementDetailView(measurement: m)) {
                             HStack(spacing: 12) {
                                 Image(systemName: m.icon)
-                                    .foregroundColor(m.type == .workout ? Color(hex: 0xe94560) : .green)
+                                    .foregroundColor(
+                                        m.type == .workout ? Color(hex: 0xe94560) :
+                                        m.type == .derived ? Color(hex: 0x5dadec) : .green
+                                    )
                                     .frame(width: 24)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(m.dateString).font(.subheadline)

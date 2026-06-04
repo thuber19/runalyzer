@@ -2,6 +2,7 @@ import Foundation
 import CoreBluetooth
 import Combine
 import os
+import UIKit
 
 /// Central coordinator for all BLE device management.
 /// Single CBCentralManager, routes to device-specific drivers.
@@ -52,9 +53,13 @@ class DeviceCoordinator: NSObject, ObservableObject {
 
     func startScanning(duration: TimeInterval = 30) {
         guard centralManager.state == .poweredOn else { return }
-        // H4: Pass explicit service UUIDs so scanning works in the background.
-        // withServices: nil only works in foreground — background BLE delivery requires known UUIDs.
-        let serviceUUIDs = Self.registeredDevices.flatMap { $0.serviceUUIDs }
+        // H4: Background scanning requires explicit service UUIDs — iOS won't deliver callbacks otherwise.
+        // In the foreground we scan with nil so devices that don't advertise their service UUID
+        // (e.g. the QN Scale, which advertises by name only) are still discovered.
+        let isBackground = UIApplication.shared.applicationState == .background
+        let serviceUUIDs: [CBUUID]? = isBackground
+            ? Self.registeredDevices.flatMap { $0.serviceUUIDs }
+            : nil
         centralManager.scanForPeripherals(withServices: serviceUUIDs, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         isScanning = true
 

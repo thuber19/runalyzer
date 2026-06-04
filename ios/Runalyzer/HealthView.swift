@@ -20,6 +20,7 @@ struct HealthView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     todaySummary
+                    sleepCard
                     workoutList
                     #if DEBUG
                     debugSection
@@ -27,11 +28,18 @@ struct HealthView: View {
                 }
                 .padding()
             }
+            .refreshable {
+                // L6: pull-to-refresh reloads workouts, summary, and sleep
+                healthKit.fetchRecentWorkouts(force: true)
+                healthKit.fetchTodaySummary { s in summary = s }
+                healthKit.fetchLastNightSleep()
+            }
             .background(Color(hex: 0x1a1a2e))
             .navigationTitle("Apple Health")
             .onAppear {
                 healthKit.fetchRecentWorkouts()
                 healthKit.fetchTodaySummary { s in summary = s }
+                healthKit.fetchLastNightSleep()
             }
             .sheet(isPresented: $showDebug) {
                 debugSheet
@@ -103,6 +111,94 @@ struct HealthView: View {
         .cornerRadius(10)
     }
 
+    // MARK: - Sleep
+    private var sleepCard: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("LAST NIGHT").font(.caption2).foregroundColor(.gray)
+                Spacer()
+                Button(action: { healthKit.fetchLastNightSleep() }) {
+                    Image(systemName: "arrow.clockwise").font(.caption)
+                }
+            }
+
+            if let s = healthKit.sleepSummary {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                    summaryCard(icon: "bed.double.fill", color: .indigo,
+                               value: s.totalAsleepString, label: "Asleep")
+                    summaryCard(icon: "moon.fill", color: .purple,
+                               value: s.totalInBedString, label: "In Bed")
+                }
+
+                if s.hasStages {
+                    Divider().background(Color.gray.opacity(0.3))
+                    Text("SLEEP STAGES").font(.system(size: 9)).foregroundColor(.gray)
+
+                    sleepStageBar(summary: s)
+
+                    HStack(spacing: 16) {
+                        sleepLegend("Deep", minutes: s.deepMinutes, color: .indigo)
+                        sleepLegend("Core", minutes: s.coreMinutes, color: .blue)
+                        sleepLegend("REM",  minutes: s.remMinutes,  color: .cyan)
+                    }
+                }
+
+                let effPct = Int(s.efficiency * 100)
+                if effPct > 0 {
+                    HStack {
+                        Text("Sleep efficiency")
+                            .font(.caption2).foregroundColor(.gray)
+                        Spacer()
+                        Text("\(effPct)%")
+                            .font(.caption.monospacedDigit())
+                            .foregroundColor(effPct >= 85 ? .green : effPct >= 70 ? .yellow : .red)
+                    }
+                }
+            } else {
+                EmptyStateView(
+                    icon: "bed.double",
+                    title: "No sleep data",
+                    message: "Sleep tracked by Apple Watch or other devices will appear here"
+                )
+                .frame(height: 80)
+            }
+        }
+        .padding()
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
+    }
+
+    private func sleepStageBar(summary s: SleepSummary) -> some View {
+        let total = max(1, s.totalAsleepMinutes)
+        return GeometryReader { proxy in
+            HStack(spacing: 0) {
+                Rectangle().fill(Color.indigo)
+                    .frame(width: proxy.size.width * CGFloat(s.deepMinutes) / CGFloat(total))
+                Rectangle().fill(Color.blue)
+                    .frame(width: proxy.size.width * CGFloat(s.coreMinutes) / CGFloat(total))
+                Rectangle().fill(Color.cyan)
+                    .frame(width: proxy.size.width * CGFloat(s.remMinutes) / CGFloat(total))
+                if s.awakeMinutes > 0 {
+                    Rectangle().fill(Color.orange)
+                        .frame(width: proxy.size.width * CGFloat(s.awakeMinutes) / CGFloat(total))
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .frame(height: 28)
+        .cornerRadius(6)
+    }
+
+    private func sleepLegend(_ label: String, minutes: Int, color: Color) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(color)
+                .frame(width: 10, height: 10)
+            Text("\(label) \(minutes / 60)h\(minutes % 60)m")
+                .font(.system(size: 9)).foregroundColor(.gray)
+        }
+    }
+
     // MARK: - Workouts
     private var workoutList: some View {
         VStack(spacing: 12) {
@@ -117,9 +213,12 @@ struct HealthView: View {
                     .padding()
                     .foregroundColor(.gray)
             } else if healthKit.workouts.isEmpty {
-                Text("No workouts found")
-                    .font(.subheadline).foregroundColor(.gray)
-                    .padding()
+                EmptyStateView(
+                    icon: "heart.slash",
+                    title: "No workouts found",
+                    message: "Workouts from Apple Health will appear here"
+                )
+                .frame(height: 140)
             } else {
                 ForEach(healthKit.workouts.prefix(20)) { workout in
                     workoutRow(workout)

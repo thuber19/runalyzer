@@ -45,7 +45,7 @@ class MeasurementStore: ObservableObject {
         for raw in rawData {
             do {
                 try raw.data.write(to: storageDir.appendingPathComponent(raw.filename),
-                                   options: [.atomic, .completeFileProtectionUnlessOpen])
+                                   options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             } catch {
                 print("Failed to write raw data \(raw.filename): \(error)")
                 return false
@@ -130,7 +130,7 @@ class MeasurementStore: ObservableObject {
             do {
                 let rawData = try JSONEncoder().encode(samples)
                 try rawData.write(to: dir.appendingPathComponent(rawFileName),
-                                  options: [.atomic, .completeFileProtectionUnlessOpen])
+                                  options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             } catch {
                 print("Failed to save IMU raw data: \(error)")
                 DispatchQueue.main.async { completion(false) }
@@ -192,7 +192,7 @@ class MeasurementStore: ObservableObject {
     private func saveIndex() -> Bool {
         do {
             let data = try JSONEncoder().encode(measurements)
-            try data.write(to: indexURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+            try data.write(to: indexURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             return true
         } catch {
             print("Failed to save measurement index: \(error)")
@@ -201,17 +201,48 @@ class MeasurementStore: ObservableObject {
     }
 
     private func loadIndex() {
-        guard FileManager.default.fileExists(atPath: indexURL.path) else { return }
-        do {
-            let data = try Data(contentsOf: indexURL)
-            measurements = try JSONDecoder().decode([SensorMeasurement].self, from: data)
-        } catch {
-            // Backup corrupt file and start fresh so the app remains usable
-            let backupURL = indexURL.deletingLastPathComponent()
-                .appendingPathComponent("measurements_corrupt_\(Int(Date().timeIntervalSince1970)).json")
-            try? FileManager.default.moveItem(at: indexURL, to: backupURL)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: indexURL.path) {
+            do {
+                let data = try Data(contentsOf: indexURL)
+                measurements = try JSONDecoder().decode([SensorMeasurement].self, from: data)
+                return
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain {
+                // IO error — file may be healthy but temporarily inaccessible; don't touch it
+                measurements = []
+                return
+            } catch {
+                // JSON decode failure — genuinely corrupt; back it up
+                let backupURL = indexURL.deletingLastPathComponent()
+                    .appendingPathComponent("measurements_corrupt_\(Int(Date().timeIntervalSince1970)).json")
+                try? fm.moveItem(at: indexURL, to: backupURL)
+            }
+        }
+
+        if let restored = latestBackupMeasurements() {
+            measurements = restored
+            saveIndex()
+        } else {
             measurements = []
             corruptDataDetected = true
         }
+    }
+
+    private func latestBackupMeasurements() -> [SensorMeasurement]? {
+        let dir = indexURL.deletingLastPathComponent()
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return nil }
+        let backups = files
+            .filter { $0.hasPrefix("measurements_corrupt_") && $0.hasSuffix(".json") }
+            .sorted(by: >)
+        for name in backups {
+            let url = dir.appendingPathComponent(name)
+            if let data = try? Data(contentsOf: url),
+               let decoded = try? JSONDecoder().decode([SensorMeasurement].self, from: data),
+               !decoded.isEmpty {
+                try? FileManager.default.removeItem(at: url)
+                return decoded
+            }
+        }
+        return nil
     }
 }

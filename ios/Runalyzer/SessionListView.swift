@@ -12,17 +12,11 @@ struct SessionListView: View {
         NavigationStack {
             Group {
                 if sessions.sessions.isEmpty && imu?.appState != .downloading {
-                    VStack(spacing: 12) {
-                        Image(systemName: "figure.run")
-                            .font(.system(size: 48))
-                            .foregroundColor(.gray)
-                        Text("No sessions yet")
-                            .foregroundColor(.gray)
-                        Text("Go to Live tab, connect, and hit Record")
-                            .font(.caption)
-                            .foregroundColor(.gray.opacity(0.7))
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    EmptyStateView(
+                        icon: "figure.run",
+                        title: "No sessions yet",
+                        message: "Go to Live tab, connect, and hit Record"
+                    )
                 } else {
                     List {
                         // Show active download at top of list
@@ -35,7 +29,7 @@ struct SessionListView: View {
                                         .tint(.cyan)
                                 }
                                 Spacer()
-                                Text("\(Int(imu?.downloadProgress ?? 0 * 100))%")
+                                Text("\(Int((imu?.downloadProgress ?? 0) * 100))%")
                                     .font(.title3.monospacedDigit())
                                     .foregroundColor(.cyan)
                             }
@@ -75,6 +69,10 @@ struct SessionListView: View {
                         }
                     }
                     .scrollContentBackground(.hidden)
+                    .refreshable {
+                        // L6: pull-to-refresh reloads sessions from disk
+                        sessions.reload()
+                    }
                 }
             }
             .background(Color(hex: 0x1a1a2e))
@@ -88,6 +86,7 @@ struct SessionDetailView: View {
     let session: RunSession
     @EnvironmentObject var sessions: SessionStore
     @EnvironmentObject var healthKit: HealthKitManager
+    @EnvironmentObject var measurementStore: MeasurementStore
     @State private var shareURL: ShareableURL?
 
     private static let eventFmt: DateFormatter = {
@@ -228,12 +227,12 @@ struct SessionDetailView: View {
         .sheet(isPresented: $showWorkoutPicker) {
             WorkoutPickerView(session: session, selectedWorkout: $selectedWorkout) {
                 if let w = selectedWorkout {
-                    // Persist the link
                     sessions.linkWorkout(w.id.uuidString, to: session.id)
                     loadingAppleData = true
                     healthKit.fetchRunData(from: w.startDate, to: w.endDate) { data in
                         appleData = data
                         loadingAppleData = false
+                        saveEnrichment(workout: w, runData: data)
                     }
                 }
             }
@@ -241,6 +240,27 @@ struct SessionDetailView: View {
         .sheet(item: $shareURL) { item in
             ShareSheet(items: [item.url])
         }
+    }
+
+    // MARK: - Session Enrichment
+
+    private func saveEnrichment(workout: AppleWorkout, runData: AppleRunData) {
+        // Don't create a duplicate if one already exists for this session+workout pair
+        let alreadyEnriched = measurementStore.measurements.contains { m in
+            m.type == .derived &&
+            m.sources.contains { $0.serialNumber == DataSource.healthKit(workout.id) }
+        }
+        guard !alreadyEnriched else { return }
+
+        let imuID = SessionEnrichment.findIMUMeasurement(for: session, in: measurementStore)
+        let input = SessionEnrichment.Input(
+            session: session,
+            workout: workout,
+            runData: runData,
+            imuMeasurementID: imuID
+        )
+        let derived = SessionEnrichment.compute(input)
+        measurementStore.save(derived)
     }
 
     // MARK: - Export

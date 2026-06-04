@@ -76,6 +76,16 @@ struct SensorMeasurement: Codable, Identifiable {
             let fat = dataPoints.first(where: { $0.type == "body_fat_percent" })?.value ?? 0
             return String(format: "%.1f kg · %.1f%% fat", weight, fat)
         case .derived:
+            let dist = dataPoints.first(where: { $0.type == DataType.distance })?.value ?? 0
+            let pace = dataPoints.first(where: { $0.type == DataType.pace })?.value ?? 0
+            let hr   = dataPoints.first(where: { $0.type == DataType.heartRate })?.value ?? 0
+            let econ = dataPoints.first(where: { $0.type == DataType.runningEconomy })?.value ?? 0
+            if dist > 0 && pace > 0 {
+                let pm = Int(pace), ps = Int((pace - Double(pm)) * 60)
+                let econStr = econ > 0 ? String(format: " · %.0f beats/km", econ) : ""
+                let hrStr   = hr > 0   ? String(format: " · %.0f bpm", hr)        : ""
+                return String(format: "%.2f km · %d:%02d /km", dist, pm, ps) + hrStr + econStr
+            }
             return dataPoints.first.map { "\($0.type): \($0.value)" } ?? "Derived"
         }
     }
@@ -135,6 +145,28 @@ enum MeasurementType: String, Codable {
     case derived = "derived"
 }
 
+// MARK: - Source string convention helpers
+
+/// Typed constructors for DataPoint.source strings.
+/// Format: "device:<serial>", "hk:<hk-uuid>", "derived:<algorithm-id>"
+enum DataSource {
+    static func device(_ serial: String) -> String { "device:\(serial)" }
+    static func healthKit(_ uuid: UUID) -> String { "hk:\(uuid.uuidString)" }
+    static func derived(_ algorithm: String) -> String { "derived:\(algorithm)" }
+}
+
+// MARK: - MeasurementSource factories (extending existing ones)
+
+extension MeasurementSource {
+    /// Source backed by an Apple Health / HealthKit record.
+    static func healthKit(workoutID: UUID, name: String = "Apple Watch") -> MeasurementSource {
+        MeasurementSource(deviceType: "apple_watch",
+                          deviceName: name,
+                          serialNumber: DataSource.healthKit(workoutID),
+                          algorithmName: nil)
+    }
+}
+
 // MARK: - Well-known data point types
 
 enum DataType {
@@ -169,6 +201,11 @@ enum DataType {
     static let activeCalories = "active_calories"
     static let pace = "pace"
 
-    // Derived
+    // Derived — running
+    static let stepLength = "step_length"         // m/step
+    static let runningEconomy = "running_economy" // beats/km (HR cost per km — lower = more efficient)
+    static let aerobicLoad = "aerobic_load"       // avg HR × duration_min (arbitrary training stress unit)
+
+    // Derived — general
     static let sleepScore = "sleep_score"
 }

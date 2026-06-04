@@ -134,7 +134,7 @@ class SessionStore: ObservableObject {
             do {
                 let data = try JSONEncoder().encode(samples)
                 try data.write(to: dir.appendingPathComponent(fileName),
-                               options: [.atomic, .completeFileProtectionUnlessOpen])
+                               options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             } catch {
                 print("FAILED to save samples: \(error)")
                 DispatchQueue.main.async { completion(false) }
@@ -214,11 +214,16 @@ class SessionStore: ObservableObject {
         }
     }
 
+    /// L6: Called from pull-to-refresh to reload sessions from disk.
+    func reload() {
+        loadSessions()
+    }
+
     @discardableResult
     private func saveSessions() -> Bool {
         do {
             let data = try JSONEncoder().encode(sessions)
-            try data.write(to: sessionsURL, options: [.atomic, .completeFileProtectionUnlessOpen])
+            try data.write(to: sessionsURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             return true
         } catch {
             print("ERROR: failed to save sessions index: \(error)")
@@ -227,17 +232,55 @@ class SessionStore: ObservableObject {
     }
 
     private func loadSessions() {
-        guard FileManager.default.fileExists(atPath: sessionsURL.path) else { return }
-        do {
-            let data = try Data(contentsOf: sessionsURL)
-            sessions = try JSONDecoder().decode([RunSession].self, from: data)
-        } catch {
-            // Backup corrupt file and start fresh so the app remains usable
-            let backupURL = sessionsURL.deletingLastPathComponent()
-                .appendingPathComponent("sessions_corrupt_\(Int(Date().timeIntervalSince1970)).json")
-            try? FileManager.default.moveItem(at: sessionsURL, to: backupURL)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: sessionsURL.path) {
+            do {
+                let data = try Data(contentsOf: sessionsURL)
+                // Only reach the decoder if the file was readable.
+                // A read failure (e.g. file temporarily protected) throws before here
+                // and falls through to backup recovery WITHOUT moving the original file.
+                sessions = try JSONDecoder().decode([RunSession].self, from: data)
+                return
+            } catch let error as NSError where error.domain == NSCocoaErrorDomain {
+                // IO error (file protected, disk error) — file may be healthy, don't touch it
+                // Just load empty for now; next foreground launch will read it fine.
+                sessions = []
+                return
+            } catch {
+                // JSON decode failure — file is actually corrupt; back it up
+                let backupURL = sessionsURL.deletingLastPathComponent()
+                    .appendingPathComponent("sessions_corrupt_\(Int(Date().timeIntervalSince1970)).json")
+                try? fm.moveItem(at: sessionsURL, to: backupURL)
+            }
+        }
+
+        // No valid index — scan for the most recent backup and restore from it.
+        // This recovers from the file-protection-vs-background-restore failure mode where
+        // a healthy file was incorrectly treated as corrupt and moved to a backup.
+        if let restored = latestBackupSessions() {
+            sessions = restored
+            saveSessions()  // write back to the canonical index location
+        } else {
             sessions = []
             corruptDataDetected = true
         }
+    }
+
+    private func latestBackupSessions() -> [RunSession]? {
+        let dir = sessionsURL.deletingLastPathComponent()
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return nil }
+        let backups = files
+            .filter { $0.hasPrefix("sessions_corrupt_") && $0.hasSuffix(".json") }
+            .sorted(by: >)  // newest first (timestamp in filename)
+        for name in backups {
+            let url = dir.appendingPathComponent(name)
+            if let data = try? Data(contentsOf: url),
+               let decoded = try? JSONDecoder().decode([RunSession].self, from: data),
+               !decoded.isEmpty {
+                try? FileManager.default.removeItem(at: url)  // clean up after successful restore
+                return decoded
+            }
+        }
+        return nil
     }
 }

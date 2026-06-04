@@ -14,6 +14,9 @@ struct MeasurementDetailView: View {
                 if measurement.type == .workout {
                     workoutExtras
                 }
+                if measurement.type == .derived {
+                    provenanceView
+                }
             }
             .padding()
         }
@@ -120,12 +123,78 @@ struct MeasurementDetailView: View {
                 Text("RAW IMU DATA").font(.caption2).foregroundColor(.gray)
                 Text("\(samples.count) samples available")
                     .font(.caption).foregroundColor(.gray)
-                // TODO: show analysis charts here
             }
         }
         .padding()
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
+    }
+
+    // MARK: - Derived Provenance
+
+    private var provenanceView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("ALGORITHM").font(.caption2).foregroundColor(.gray)
+            ForEach(measurement.sources) { source in
+                HStack(spacing: 8) {
+                    Image(systemName: iconForSource(source))
+                        .foregroundColor(colorForSource(source))
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(source.deviceName).font(.subheadline)
+                        if let algo = source.algorithmName {
+                            Text(algo).font(.caption2).foregroundColor(.gray)
+                        } else if let serial = source.serialNumber {
+                            Text(readableSerial(serial)).font(.caption2).foregroundColor(.gray)
+                        }
+                    }
+                    Spacer()
+                }
+            }
+            if let inputs = measurement.inputMeasurements, !inputs.isEmpty {
+                Divider().background(Color.gray.opacity(0.3))
+                Text("INPUT MEASUREMENTS").font(.caption2).foregroundColor(.gray)
+                ForEach(inputs, id: \.self) { id in
+                    if let m = measurementStore.measurement(byID: id) {
+                        NavigationLink(destination: MeasurementDetailView(measurement: m)) {
+                            HStack {
+                                Image(systemName: m.icon).foregroundColor(.cyan).frame(width: 20)
+                                Text(m.dateString).font(.caption)
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundColor(.gray).font(.caption2)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
+    }
+
+    private func iconForSource(_ source: MeasurementSource) -> String {
+        switch source.deviceType {
+        case "apple_watch": return "applewatch"
+        case "imu_sensor":  return "waveform.path.ecg"
+        case "algorithm":   return "function"
+        default:            return "antenna.radiowaves.left.and.right"
+        }
+    }
+
+    private func colorForSource(_ source: MeasurementSource) -> Color {
+        switch source.deviceType {
+        case "apple_watch": return .pink
+        case "imu_sensor":  return Color(hex: 0x4ecca3)
+        case "algorithm":   return Color(hex: 0x5dadec)
+        default:            return .gray
+        }
+    }
+
+    private func readableSerial(_ serial: String) -> String {
+        if serial.hasPrefix("hk:") { return "HealthKit · \(serial.dropFirst(3).prefix(8))…" }
+        if serial.hasPrefix("device:") { return "Session · \(serial.dropFirst(7).prefix(8))…" }
+        return serial
     }
 
     // MARK: - Helpers
@@ -150,20 +219,34 @@ struct MeasurementDetailView: View {
         case DataType.durationSec: return "Duration"
         case DataType.distance: return "Distance"
         case DataType.activeCalories: return "Active Calories"
+        case DataType.pace: return "Pace"
+        case DataType.stepLength: return "Step Length"
+        case DataType.runningEconomy: return "Running Economy"
+        case DataType.aerobicLoad: return "Aerobic Load"
         default: return type.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 
     private func formatValue(_ p: DataPoint) -> String {
-        if p.type == DataType.durationSec {
+        switch p.type {
+        case DataType.durationSec:
             let m = Int(p.value) / 60, s = Int(p.value) % 60
             return String(format: "%d:%02d", m, s)
+        case DataType.pace:
+            // value is min/km — display as m:ss
+            let m = Int(p.value), s = Int((p.value - Double(m)) * 60)
+            return String(format: "%d:%02d", m, s)
+        case DataType.stepLength:
+            return String(format: "%.3f", p.value)
+        default:
+            return String(format: "%.2f", p.value)
         }
-        return String(format: "%.2f", p.value)
     }
 
     private func shortSource(_ source: String) -> String {
         if source.hasPrefix("derived:") { return String(source.dropFirst(8)) }
+        if source.hasPrefix("hk:")      { return "Watch" }
+        if source.hasPrefix("device:")  { return "IMU" }
         return ""
     }
 }

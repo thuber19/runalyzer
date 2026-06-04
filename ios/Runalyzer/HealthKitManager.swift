@@ -91,12 +91,35 @@ struct HealthSummary {
     var distanceKm: Double { distanceMeters / 1000 }
 }
 
+/// Sleep summary for a single night (last night by default).
+struct SleepSummary {
+    var totalInBedMinutes: Int = 0
+    var totalAsleepMinutes: Int = 0
+    var remMinutes: Int = 0
+    var coreMinutes: Int = 0
+    var deepMinutes: Int = 0
+    var awakeMinutes: Int = 0
+    var hasStages: Bool { remMinutes + coreMinutes + deepMinutes > 0 }
+
+    var totalInBedString: String { formatMinutes(totalInBedMinutes) }
+    var totalAsleepString: String { formatMinutes(totalAsleepMinutes) }
+    var efficiency: Double {
+        guard totalInBedMinutes > 0 else { return 0 }
+        return Double(totalAsleepMinutes) / Double(totalInBedMinutes)
+    }
+
+    private func formatMinutes(_ m: Int) -> String {
+        String(format: "%dh %02dm", m / 60, m % 60)
+    }
+}
+
 class HealthKitManager: ObservableObject {
     let store = HKHealthStore()
 
     @Published var authorized = false
     @Published var workouts: [AppleWorkout] = []
     @Published var isLoadingWorkouts = false  // M3: distinguish "loading" from "empty"
+    @Published var sleepSummary: SleepSummary?
 
     // M4: cache to avoid redundant queries
     private var lastWorkoutFetch: Date?
@@ -110,6 +133,7 @@ class HealthKitManager: ObservableObject {
         types.insert(HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)
         types.insert(HKObjectType.workoutType())
+        types.insert(HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!)
         return types
     }()
 
@@ -128,6 +152,7 @@ class HealthKitManager: ObservableObject {
                 // even when user grants read access (privacy design)
                 self.authorized = true
                 self.fetchRecentWorkouts()
+                self.fetchLastNightSleep()
             }
         }
     }
@@ -320,6 +345,70 @@ class HealthKitManager: ObservableObject {
             }
             let value = stats?.sumQuantity()?.doubleValue(for: unit) ?? 0
             completion(value)
+        }
+        store.execute(query)
+    }
+
+    // MARK: - Fetch Sleep Data
+
+    /// Fetches sleep analysis for the most recent night (8:00 PM yesterday → 12:00 PM today).
+    /// Wide window handles late sleepers and naps without missing early-morning wake-up data.
+    func fetchLastNightSleep() {
+        let cal = Calendar.current
+        let now = Date()
+        // Window end: noon today (or now if before noon, so we don't miss this morning)
+        var noonComps = cal.dateComponents([.year, .month, .day], from: now)
+        noonComps.hour = 12
+        let todayNoon = cal.date(from: noonComps)!
+        let windowEnd = min(todayNoon, now)
+
+        // Window start: 8pm yesterday
+        var eveningComps = cal.dateComponents([.year, .month, .day], from: now.addingTimeInterval(-86400))
+        eveningComps.hour = 20
+        let windowStart = cal.date(from: eveningComps)!
+
+        let predicate = HKQuery.predicateForSamples(withStart: windowStart, end: windowEnd, options: .strictStartDate)
+
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else { return }
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let query = HKSampleQuery(sampleType: sleepType, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { [weak self] _, results, error in
+            if let error { AppLogger.health.error("Sleep query error: \(error.localizedDescription)") }
+            let samples = results as? [HKCategorySample] ?? []
+            var summary = SleepSummary()
+
+            for sample in samples {
+                let minutes = Int(sample.endDate.timeIntervalSince(sample.startDate) / 60)
+                guard minutes > 0 else { continue }
+
+                switch HKCategoryValueSleepAnalysis(rawValue: sample.value) {
+                case .inBed:
+                    summary.totalInBedMinutes += minutes
+                case .asleepUnspecified, .asleep:
+                    summary.totalAsleepMinutes += minutes
+                case .awake:
+                    summary.awakeMinutes += minutes
+                case .asleepREM:
+                    summary.remMinutes += minutes
+                    summary.totalAsleepMinutes += minutes
+                case .asleepCore:
+                    summary.coreMinutes += minutes
+                    summary.totalAsleepMinutes += minutes
+                case .asleepDeep:
+                    summary.deepMinutes += minutes
+                    summary.totalAsleepMinutes += minutes
+                default:
+                    break
+                }
+            }
+
+            // Apple Watch records staged sleep (core/REM/deep) without inBed entries.
+            // Fall back to using total asleep time as "in bed" so the card always renders.
+            if summary.totalInBedMinutes == 0 {
+                summary.totalInBedMinutes = summary.totalAsleepMinutes + summary.awakeMinutes
+            }
+            let hasSleepData = summary.totalAsleepMinutes > 0 || summary.totalInBedMinutes > 0
+            DispatchQueue.main.async { self?.sleepSummary = hasSleepData ? summary : nil }
         }
         store.execute(query)
     }

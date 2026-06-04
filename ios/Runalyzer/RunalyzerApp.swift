@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import UIKit
 
 @main
 struct RunalyzerApp: App {
@@ -56,6 +57,22 @@ class AppWiring: ObservableObject {
             "imu_sensor": Self.imuHandler(metrics: metrics, store: store, sessions: sessions),
             "qn_scale":   Self.scaleHandler(store: store)
         ]
+
+        // L4: Update app icon badge when IMU has unsynced data
+        coordinator.$imuDriver
+            .flatMap { driver -> AnyPublisher<Bool, Never> in
+                guard let imu = driver else {
+                    return Just(false).eraseToAnyPublisher()
+                }
+                return imu.$deviceStatus
+                    .map { $0.state == .hasData && $0.sampleCount > 0 }
+                    .eraseToAnyPublisher()
+            }
+            .receive(on: DispatchQueue.main)
+            .sink { hasUnsynced in
+                UIApplication.shared.applicationIconBadgeNumber = hasUnsynced ? 1 : 0
+            }
+            .store(in: &cancellables)
 
         coordinator.$activeDrivers
             .sink { [weak self] drivers in
