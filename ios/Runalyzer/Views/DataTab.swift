@@ -12,6 +12,8 @@ private enum DataFilter: String, CaseIterable {
 struct DataTab: View {
     @EnvironmentObject var measurementStore: MeasurementStore
     @State private var filter: DataFilter = .all
+    @State private var selection = Set<UUID>()
+    @State private var editMode: EditMode = .inactive
 
     private var filtered: [SensorMeasurement] {
         let sorted = measurementStore.measurements.sorted { $0.date > $1.date }
@@ -26,7 +28,7 @@ struct DataTab: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            List(selection: $selection) {
                 // Filter chips
                 Section {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -62,14 +64,38 @@ struct DataTab: View {
                         .listRowBackground(Color(hex: 0x16213e))
                     }
                     .onDelete { indexSet in
-                        let ids = indexSet.map { filtered[$0].id }
-                        for id in ids { measurementStore.delete(id) }
+                        let ids = Set(indexSet.map { filtered[$0].id })
+                        measurementStore.deleteBatch(ids)
                     }
                 }
             }
             .scrollContentBackground(.hidden)
             .background(Color(hex: 0x1a1a2e))
             .navigationTitle("Data")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    EditButton()
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if editMode == .active {
+                        Button(selection.count == filtered.count ? "Deselect All" : "Select All") {
+                            if selection.count == filtered.count {
+                                selection.removeAll()
+                            } else {
+                                selection = Set(filtered.map(\.id))
+                            }
+                        }
+                        if !selection.isEmpty {
+                            Button("Delete \(selection.count)", role: .destructive) {
+                                measurementStore.deleteBatch(selection)
+                                selection.removeAll()
+                                editMode = .inactive
+                            }
+                        }
+                    }
+                }
+            }
+            .environment(\.editMode, $editMode)
         }
     }
 
@@ -90,8 +116,8 @@ struct DataTab: View {
     }
 
     private func iconColor(_ m: SensorMeasurement) -> Color {
-        if isStress(m)  { return Color(hex: 0xf4a261) }  // amber for stress
-        if isRunning(m) { return Color(hex: 0x5dadec) }  // blue for running enrichment
+        if isStress(m)  { return Color(hex: 0xf4a261) }
+        if isRunning(m) { return Color(hex: 0x5dadec) }
         switch m.type {
         case .workout:  return Color(hex: 0xe94560)
         case .derived:  return Color(hex: 0x5dadec)

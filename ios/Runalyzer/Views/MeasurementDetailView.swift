@@ -4,6 +4,7 @@ import SwiftUI
 struct MeasurementDetailView: View {
     let measurement: SensorMeasurement
     @EnvironmentObject var measurementStore: MeasurementStore
+    @State private var imuSampleCount: Int = 0
 
     var body: some View {
         ScrollView {
@@ -22,6 +23,11 @@ struct MeasurementDetailView: View {
         }
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle(measurement.dateString)
+        .onAppear {
+            if measurement.type == .workout {
+                imuSampleCount = measurementStore.loadIMUSamples(for: measurement).count
+            }
+        }
     }
 
     // MARK: - Source Info
@@ -87,7 +93,7 @@ struct MeasurementDetailView: View {
         let sortedKeys = grouped.keys.sorted()
 
         ForEach(sortedKeys, id: \.self) { key in
-            let pts = grouped[key]!
+            let pts = grouped[key] ?? []
 
             if pts.count == 1, let p = pts.first {
                 dataRow(label: displayName(for: p.type), value: formatValue(p),
@@ -140,10 +146,9 @@ struct MeasurementDetailView: View {
 
     private var workoutExtras: some View {
         VStack(spacing: 8) {
-            let samples = measurementStore.loadIMUSamples(for: measurement)
-            if !samples.isEmpty {
+            if imuSampleCount > 0 {
                 Text("RAW IMU DATA").font(.caption2).foregroundColor(.gray)
-                Text("\(samples.count) samples available")
+                Text("\(imuSampleCount) samples available")
                     .font(.caption).foregroundColor(.gray)
             }
         }
@@ -253,6 +258,8 @@ struct MeasurementDetailView: View {
         case DataType.stressSDNNmax: return "SDNN (max)"
         case DataType.stressSDNNcount: return "HRV Readings"
         case DataType.stressRestingHR: return "Resting HR"
+        case DataType.stressBaselineSDNN: return "30-Day Avg SDNN"
+        case DataType.stressBaselineRHR: return "30-Day Avg RHR"
         case DataType.stressConfidence: return "Confidence"
         default: return type.replacingOccurrences(of: "_", with: " ").capitalized
         }
@@ -271,7 +278,7 @@ struct MeasurementDetailView: View {
             return String(format: "%.3f", p.value)
         case DataType.stressIndex, DataType.stressHRVComponent, DataType.stressRHRComponent:
             return String(Int(p.value.rounded()))
-        case DataType.stressSDNNavg, DataType.stressSDNNmin, DataType.stressSDNNmax:
+        case DataType.stressSDNNavg, DataType.stressSDNNmin, DataType.stressSDNNmax, DataType.stressBaselineSDNN:
             return String(format: "%.1f", p.value)
         case DataType.stressSDNNcount:
             return String(Int(p.value))

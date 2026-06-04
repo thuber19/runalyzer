@@ -2,6 +2,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
+    @EnvironmentObject var appWiring: AppWiring
+    @State private var isBackfilling = false
 
     var body: some View {
         NavigationStack {
@@ -19,6 +21,30 @@ struct SettingsView: View {
                     NavigationLink(destination: ScaleSettingsView()) {
                         Label("Body Profile", systemImage: "person.fill")
                     }
+                    .listRowBackground(Color(hex: 0x16213e))
+                }
+
+                // Data
+                Section("Data") {
+                    Button(action: {
+                        isBackfilling = true
+                        appWiring.stressProvider?.backfillHistory(days: 90)
+                        // Reset after a delay (backfill is async)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            isBackfilling = false
+                        }
+                    }) {
+                        HStack {
+                            Label("Backfill Stress History", systemImage: "clock.arrow.circlepath")
+                            Spacer()
+                            if isBackfilling {
+                                ProgressView()
+                            } else {
+                                Text("120 days").foregroundColor(.gray)
+                            }
+                        }
+                    }
+                    .disabled(isBackfilling)
                     .listRowBackground(Color(hex: 0x16213e))
                 }
 

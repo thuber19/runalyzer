@@ -514,6 +514,61 @@ class HealthKitManager: ObservableObject {
         }
     }
 
+    /// Fetch stress inputs for a single day (lightweight — for incremental daily computation).
+    func fetchStressInputsForDay(_ date: Date, completion: @escaping (DaytimeStress.DayInputs) -> Void) {
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: date)
+        guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else {
+            completion(DaytimeStress.DayInputs(date: dayStart, sdnnSamples: [], restingHR: nil, restingHRSource: nil))
+            return
+        }
+
+        let predicate = HKQuery.predicateForSamples(withStart: dayStart, end: dayEnd, options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let group = DispatchGroup()
+
+        var sdnnSamples: [(value: Double, sourceName: String)] = []
+        var rhrValue: Double? = nil
+        var rhrSource: String? = nil
+
+        group.enter()
+        if let sdnnType = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            let unit = HKUnit.secondUnit(with: .milli)
+            let q = HKSampleQuery(sampleType: sdnnType, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, results, _ in
+                sdnnSamples = (results as? [HKQuantitySample] ?? [])
+                    .filter { cal.component(.hour, from: $0.startDate) >= 6 &&
+                              cal.component(.hour, from: $0.startDate) < 23 }
+                    .map { (value: $0.quantity.doubleValue(for: unit),
+                            sourceName: $0.sourceRevision.source.name) }
+                group.leave()
+            }
+            store.execute(q)
+        } else { group.leave() }
+
+        group.enter()
+        if let rhrType = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) {
+            let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+            let q = HKSampleQuery(sampleType: rhrType, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, results, _ in
+                if let samples = results as? [HKQuantitySample],
+                   let best = samples.min(by: { $0.quantity.doubleValue(for: bpmUnit) < $1.quantity.doubleValue(for: bpmUnit) }) {
+                    rhrValue = best.quantity.doubleValue(for: bpmUnit)
+                    rhrSource = best.sourceRevision.source.name
+                }
+                group.leave()
+            }
+            store.execute(q)
+        } else { group.leave() }
+
+        group.notify(queue: .main) {
+            completion(DaytimeStress.DayInputs(
+                date: dayStart, sdnnSamples: sdnnSamples,
+                restingHR: rhrValue, restingHRSource: rhrSource
+            ))
+        }
+    }
+
     // MARK: - Debug: dump all data types available for a time range
     func debugDump(from startDate: Date, to endDate: Date, completion: @escaping (String) -> Void) {
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)

@@ -27,12 +27,12 @@ struct RunalyzerTab: View {
     }
 
     private var workoutHistory: some View {
-        List {
+        VStack(alignment: .leading, spacing: 0) {
             let workouts = measurementStore.measurements(ofType: .workout)
             if workouts.isEmpty {
                 Text("No recordings yet. Connect your sensor and start recording.")
                     .foregroundColor(.gray)
-                    .listRowBackground(Color(hex: 0x16213e))
+                    .padding()
             } else {
                 ForEach(workouts) { m in
                     NavigationLink(destination: MeasurementDetailView(measurement: m)) {
@@ -43,14 +43,19 @@ struct RunalyzerTab: View {
                                 Text(m.summary).font(.caption).foregroundColor(.gray)
                                 Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
                             }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundColor(.gray).font(.caption2)
                         }
+                        .padding(.horizontal).padding(.vertical, 10)
                     }
-                    .listRowBackground(Color(hex: 0x16213e))
+                    .buttonStyle(.plain)
+                    if m.id != workouts.last?.id {
+                        Divider().background(Color.gray.opacity(0.2)).padding(.leading, 48)
+                    }
                 }
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(Color(hex: 0x1a1a2e))
-        .frame(minHeight: 200)
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
     }
 }

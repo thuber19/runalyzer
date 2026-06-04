@@ -21,6 +21,7 @@ struct RunalyzerApp: App {
                 .environmentObject(store)
                 .environmentObject(healthKit)
                 .environmentObject(sessions)
+                .environmentObject(appWiring)
                 .onAppear {
                     healthKit.requestAuthorization()
                     appWiring.setup(coordinator: coordinator, metrics: metrics,
@@ -50,21 +51,21 @@ class AppWiring: ObservableObject {
     // Measurement providers — self-contained pipelines
     private var scaleProvider: ScaleMeasurementProvider?
     private var imuProvider: IMUMeasurementProvider?
-    private var stressProvider: StressMeasurementProvider?
+    private(set) var stressProvider: StressMeasurementProvider?
 
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, healthKit: HealthKitManager, sessions: SessionStore) {
 
         // Create providers
         scaleProvider = ScaleMeasurementProvider(measurementStore: store)
-        imuProvider = IMUMeasurementProvider(measurementStore: store)
+        imuProvider = IMUMeasurementProvider(measurementStore: store, sessionStore: sessions)
         stressProvider = StressMeasurementProvider(healthKit: healthKit, measurementStore: store)
 
         // Per-descriptor handlers — keyed by DeviceDescriptor.id.
         // To add a new device: add one entry here + create a provider.
         let handlers: [String: (any DeviceDriver) -> AnyCancellable?] = [
-            "imu_sensor": Self.imuHandler(metrics: metrics, imuProvider: imuProvider!, sessions: sessions),
-            "qn_scale":   Self.scaleHandler(scaleProvider: scaleProvider!)
+            "imu_sensor": Self.imuHandler(metrics: metrics, imuProvider: imuProvider),
+            "qn_scale":   Self.scaleHandler(scaleProvider: scaleProvider)
         ]
 
         // L4: Update app icon badge when IMU has unsynced data
@@ -111,15 +112,14 @@ class AppWiring: ObservableObject {
 
     // MARK: - Wiring factories
 
-    private static func imuHandler(metrics: RunMetrics, imuProvider: IMUMeasurementProvider,
-                                   sessions: SessionStore) -> (any DeviceDriver) -> AnyCancellable? {
-        { [weak metrics, weak imuProvider, weak sessions] driver in
+    private static func imuHandler(metrics: RunMetrics, imuProvider: IMUMeasurementProvider?)
+        -> (any DeviceDriver) -> AnyCancellable? {
+        { [weak metrics, weak imuProvider] driver in
             guard let imu = driver as? IMUSensorDriver else { return nil }
             imu.onPacket = { [weak metrics] packet in metrics?.process(packet) }
-            imu.onDownloadComplete = { [weak imuProvider, weak sessions, weak imu] samples, status, events in
+            imu.onDownloadComplete = { [weak imuProvider, weak imu] samples, status, events in
                 guard let imu else { return }
-
-                // Provider handles: analysis → measurement creation → save → erase
+                // Provider handles: analysis → measurement + legacy session → save → erase
                 imuProvider?.handleDownloadComplete(
                     samples: samples,
                     sampleRateHz: Int(status.sampleRateHz),
@@ -128,20 +128,12 @@ class AppWiring: ObservableObject {
                     events: events.isEmpty ? nil : events,
                     driver: imu
                 )
-
-                // Legacy session store (still used by session detail views)
-                sessions?.saveDownloadedSession(
-                    samples: samples, sampleRateHz: Int(status.sampleRateHz),
-                    durationSec: Double(status.recordingDurationSec),
-                    startUnixMs: status.recordingStartUnixMs,
-                    events: events.isEmpty ? nil : events
-                ) { _ in }
             }
             return nil  // callback-based wiring; no Combine subscription to track
         }
     }
 
-    private static func scaleHandler(scaleProvider: ScaleMeasurementProvider) -> (any DeviceDriver) -> AnyCancellable? {
+    private static func scaleHandler(scaleProvider: ScaleMeasurementProvider?) -> (any DeviceDriver) -> AnyCancellable? {
         { [weak scaleProvider] driver in
             guard let scale = driver as? QNScaleDriver else { return nil }
             return scale.events

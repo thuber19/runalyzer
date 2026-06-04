@@ -45,7 +45,7 @@ enum DaytimeStress {
 
     // MARK: - Baseline
 
-    /// Build a baseline from up to `baselineWindowDays` prior days.
+    /// Build a baseline from up to `baselineWindowDays` prior DayInputs (used during initial backfill).
     static func buildBaseline(from priorDays: [DayInputs]) -> BaselineStats {
         let window = priorDays.suffix(baselineWindowDays)
 
@@ -60,6 +60,31 @@ enum DaytimeStress {
         let meanRHR  = rhrValues.isEmpty ? 0
             : rhrValues.reduce(0, +) / Double(rhrValues.count)
         let dayCount = max(sdnnDailyMeans.count, rhrValues.count)
+
+        return BaselineStats(meanSDNN: meanSDNN, meanRestingHR: meanRHR, dayCount: dayCount)
+    }
+
+    /// Build a baseline from previously stored stress measurements (incremental daily mode).
+    /// Reads `stressSDNNavg` and `stressRestingHR` DataPoints from the last 30 measurements.
+    /// This avoids re-fetching historical HealthKit data.
+    static func buildBaselineFromStore(_ measurements: [SensorMeasurement]) -> BaselineStats {
+        let window = measurements
+            .filter { $0.type == .derived && $0.sources.contains { $0.algorithmName == algorithmID } }
+            .sorted { $0.date > $1.date }
+            .prefix(baselineWindowDays)
+
+        let sdnnValues: [Double] = window.compactMap { m in
+            m.dataPoints.first(where: { $0.type == DataType.stressSDNNavg })?.value
+        }
+        let rhrValues: [Double] = window.compactMap { m in
+            m.dataPoints.first(where: { $0.type == DataType.stressRestingHR })?.value
+        }
+
+        let meanSDNN = sdnnValues.isEmpty ? 0
+            : sdnnValues.reduce(0, +) / Double(sdnnValues.count)
+        let meanRHR  = rhrValues.isEmpty ? 0
+            : rhrValues.reduce(0, +) / Double(rhrValues.count)
+        let dayCount = max(sdnnValues.count, rhrValues.count)
 
         return BaselineStats(meanSDNN: meanSDNN, meanRestingHR: meanRHR, dayCount: dayCount)
     }
@@ -79,8 +104,8 @@ enum DaytimeStress {
         if !inputs.sdnnSamples.isEmpty, baseline.meanSDNN > 0 {
             let values = inputs.sdnnValues
             let avg = values.reduce(0, +) / Double(values.count)
-            let mn  = values.min()!
-            let mx  = values.max()!
+            let mn  = values.min() ?? avg
+            let mx  = values.max() ?? avg
 
             let sdnnSrc = DataSource.healthKitSource(inputs.sdnnSamples.first?.sourceName ?? "Apple Watch")
 
@@ -146,7 +171,71 @@ enum DaytimeStress {
                             type: DataType.stressConfidence, value: confidence,
                             unit: "", source: algoSrc, role: .detail))
 
+        // Store the baseline values used — shows "your 30-day norm" alongside today's values
+        if baseline.meanSDNN > 0 {
+            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
+                                type: DataType.stressBaselineSDNN, value: baseline.meanSDNN,
+                                unit: "ms", source: algoSrc, role: .detail))
+        }
+        if baseline.meanRestingHR > 0 {
+            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
+                                type: DataType.stressBaselineRHR, value: baseline.meanRestingHR,
+                                unit: "bpm", source: algoSrc, role: .detail))
+        }
+
         // Derive MeasurementSource list from the actual HK sources found in the data
+        var hkNames = Set(inputs.sdnnSamples.map(\.sourceName))
+        if let rhrSrc = inputs.restingHRSource { hkNames.insert(rhrSrc) }
+        let hkSources = hkNames.map { MeasurementSource.healthKitDevice(name: $0) }
+
+        return SensorMeasurement(
+            id: UUID(),
+            date: date,
+            type: .derived,
+            sources: hkSources + [.algorithm(name: algorithmID)],
+            dataPoints: dp,
+            rawDataFiles: []
+        )
+    }
+
+    /// Create a measurement with raw HK values only — no stress score.
+    /// Used when <30 days of baseline data exist. These measurements feed into the
+    /// rolling baseline for future scoring.
+    static func rawMeasurement(inputs: DayInputs, baselineDayCount: Int) -> SensorMeasurement? {
+        guard !inputs.sdnnSamples.isEmpty || inputs.restingHR != nil else { return nil }
+
+        let date = Calendar.current.startOfDay(for: inputs.date)
+        var dp: [DataPoint] = []
+
+        // Store raw HRV values from HealthKit
+        if !inputs.sdnnSamples.isEmpty {
+            let values = inputs.sdnnValues
+            let avg = values.reduce(0, +) / Double(values.count)
+            let sdnnSrc = DataSource.healthKitSource(inputs.sdnnSamples.first?.sourceName ?? "Apple Watch")
+
+            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
+                                type: DataType.stressSDNNavg, value: avg,
+                                unit: "ms", source: sdnnSrc, role: .primary))
+            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
+                                type: DataType.stressSDNNmin, value: values.min() ?? avg,
+                                unit: "ms", source: sdnnSrc, role: .detail))
+            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
+                                type: DataType.stressSDNNmax, value: values.max() ?? avg,
+                                unit: "ms", source: sdnnSrc, role: .detail))
+            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
+                                type: DataType.stressSDNNcount, value: Double(values.count),
+                                unit: "readings", source: sdnnSrc, role: .detail))
+        }
+
+        // Store raw resting HR from HealthKit
+        if let rhr = inputs.restingHR {
+            let rhrSrc = DataSource.healthKitSource(inputs.restingHRSource ?? "Apple Watch")
+            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
+                                type: DataType.stressRestingHR, value: rhr,
+                                unit: "bpm", source: rhrSrc, role: .primary))
+        }
+
+        // Derive sources from HK data
         var hkNames = Set(inputs.sdnnSamples.map(\.sourceName))
         if let rhrSrc = inputs.restingHRSource { hkNames.insert(rhrSrc) }
         let hkSources = hkNames.map { MeasurementSource.healthKitDevice(name: $0) }

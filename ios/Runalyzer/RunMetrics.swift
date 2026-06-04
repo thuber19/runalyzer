@@ -62,8 +62,8 @@ class RunMetrics: ObservableObject {
         filteredAccel = alphaF * noGrav + (1 - alphaF) * filteredAccel
         let slope = filteredAccel - prevFilteredAccel
         if prevSlope > 0 && slope <= 0 && filteredAccel > liveThreshold && peakCooldown <= 0 {
-            if lastStepTime > 0 {
-                let interval = Float(p.timestamp - lastStepTime)
+            if lastStepTime > 0 && p.timestamp > lastStepTime {
+                let interval = Float(p.timestamp &- lastStepTime)
                 if interval > 250 && interval < 1200 {
                     recentStepIntervals.append(interval)
                     if recentStepIntervals.count > 12 { recentStepIntervals.removeFirst() }
@@ -80,7 +80,7 @@ class RunMetrics: ObservableObject {
         if peakCooldown > 0 { peakCooldown -= 1 }
 
         // Reset cadence if no step detected for 2 seconds
-        if lastStepTime > 0 && (p.timestamp - lastStepTime) > 2000 {
+        if lastStepTime > 0 && p.timestamp > lastStepTime && (p.timestamp &- lastStepTime) > 2000 {
             cadence = 0
             recentStepIntervals.removeAll()
         }

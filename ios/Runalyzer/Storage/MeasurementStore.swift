@@ -36,9 +36,10 @@ class MeasurementStore: ObservableObject {
     // MARK: - Save
 
     /// Save a measurement with optional raw data file.
+    /// Must be called on main thread (@Published mutations).
     @discardableResult
     func save(_ measurement: SensorMeasurement, rawData: [(filename: String, data: Data)] = []) -> Bool {
-        // Duplicate check
+        assert(Thread.isMainThread, "MeasurementStore.save must be called on main thread")
         if measurements.contains(where: { $0.id == measurement.id }) { return true }
 
         // Write raw data files
@@ -57,8 +58,10 @@ class MeasurementStore: ObservableObject {
     }
 
     /// Batch-save multiple measurements in one index write (avoids N re-encodes).
+    /// Must be called on main thread (@Published mutations).
     @discardableResult
     func saveBatch(_ newMeasurements: [SensorMeasurement]) -> Bool {
+        assert(Thread.isMainThread, "MeasurementStore.saveBatch must be called on main thread")
         var added = 0
         for m in newMeasurements {
             guard !measurements.contains(where: { $0.id == m.id }) else { continue }
@@ -81,28 +84,47 @@ class MeasurementStore: ObservableObject {
 
     // MARK: - Link
 
-    func link(_ id1: UUID, with id2: UUID) {
+    @discardableResult
+    func link(_ id1: UUID, with id2: UUID) -> Bool {
+        assert(Thread.isMainThread, "MeasurementStore.link must be called on main thread")
         guard let idx1 = measurements.firstIndex(where: { $0.id == id1 }),
-              let idx2 = measurements.firstIndex(where: { $0.id == id2 }) else { return }
+              let idx2 = measurements.firstIndex(where: { $0.id == id2 }) else { return false }
         var linked1 = measurements[idx1].linkedMeasurements ?? []
         var linked2 = measurements[idx2].linkedMeasurements ?? []
         if !linked1.contains(id2) { linked1.append(id2) }
         if !linked2.contains(id1) { linked2.append(id1) }
         measurements[idx1].linkedMeasurements = linked1
         measurements[idx2].linkedMeasurements = linked2
-        saveIndex()
+        return saveIndex()
     }
 
     // MARK: - Delete
 
-    func delete(_ id: UUID) {
-        guard let idx = measurements.firstIndex(where: { $0.id == id }) else { return }
+    @discardableResult
+    func delete(_ id: UUID) -> Bool {
+        assert(Thread.isMainThread, "MeasurementStore.delete must be called on main thread")
+        guard let idx = measurements.firstIndex(where: { $0.id == id }) else { return false }
         let m = measurements[idx]
         for file in m.rawDataFiles {
             try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(file))
         }
         measurements.remove(at: idx)
-        saveIndex()
+        return saveIndex()
+    }
+
+    /// Batch-delete multiple measurements in one index write.
+    @discardableResult
+    func deleteBatch(_ ids: Set<UUID>) -> Bool {
+        assert(Thread.isMainThread, "MeasurementStore.deleteBatch must be called on main thread")
+        for id in ids {
+            guard let idx = measurements.firstIndex(where: { $0.id == id }) else { continue }
+            let m = measurements[idx]
+            for file in m.rawDataFiles {
+                try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(file))
+            }
+            measurements.remove(at: idx)
+        }
+        return saveIndex()
     }
 
     // MARK: - Persistence

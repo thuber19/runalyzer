@@ -106,6 +106,7 @@ struct SensorMeasurement: Codable, Identifiable {
             return String(format: "%.1f kg · %.1f%% fat", weight, fat)
         case .derived:
             // Daytime stress score
+            // Stress measurement (with or without score)
             if let stress = dataPoints.first(where: { $0.type == DataType.stressIndex }) {
                 let level = Int(stress.value.rounded())
                 let label: String
@@ -114,9 +115,15 @@ struct SensorMeasurement: Codable, Identifiable {
                 case ..<60: label = "Moderate"
                 default:    label = "High"
                 }
-                let conf = dataPoints.first(where: { $0.type == DataType.stressConfidence })?.value ?? 1.0
-                let confStr = conf < 0.6 ? " · partial" : ""
-                return "Stress \(level) · \(label)\(confStr)"
+                return "Stress \(level) · \(label)"
+            } else if dataPoints.contains(where: { $0.type == DataType.stressSDNNavg || $0.type == DataType.stressRestingHR }) {
+                // Raw values only — collecting baseline data
+                let sdnn = dataPoints.first(where: { $0.type == DataType.stressSDNNavg })
+                let rhr = dataPoints.first(where: { $0.type == DataType.stressRestingHR })
+                var parts: [String] = []
+                if let s = sdnn { parts.append(String(format: "SDNN %.0f ms", s.value)) }
+                if let r = rhr { parts.append(String(format: "RHR %.0f bpm", r.value)) }
+                return parts.joined(separator: " · ") + " · collecting"
             }
             // Running enrichment
             let dist = dataPoints.first(where: { $0.type == DataType.distance })?.value ?? 0
@@ -271,5 +278,7 @@ enum DataType {
     static let stressSDNNmax      = "stress_sdnn_max"       // max daytime SDNN (ms)
     static let stressSDNNcount    = "stress_sdnn_count"     // number of HRV readings
     static let stressRestingHR    = "stress_resting_hr"     // Apple Watch resting HR (bpm)
+    static let stressBaselineSDNN = "stress_baseline_sdnn"  // 30-day rolling avg SDNN (ms)
+    static let stressBaselineRHR  = "stress_baseline_rhr"   // 30-day rolling avg RHR (bpm)
     static let stressConfidence   = "stress_confidence"     // 0–1 data quality
 }

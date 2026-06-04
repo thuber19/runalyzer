@@ -83,8 +83,23 @@ class SessionStore: ObservableObject {
         loadSessions()
     }
 
+    /// Save a pre-built session (analysis already done by IMUMeasurementProvider).
+    /// Legacy path — used until session detail views migrate to MeasurementStore.
+    func saveLegacySession(_ session: RunSession, rawSamples: [RecordedSample]) {
+        // H8: duplicate check
+        let isDuplicate = sessions.contains { s in
+            abs(s.date.timeIntervalSince(session.date)) < 5 && s.sampleCount == rawSamples.count
+        }
+        guard !isDuplicate else { return }
+
+        // Raw samples already saved by IMUMeasurementProvider — just save session index
+        sessions.insert(session, at: 0)
+        saveSessions()
+    }
+
     /// Save a session downloaded from device flash. Completion called with success flag.
     /// M2: Heavy work (analysis, encoding) done on background queue.
+    @available(*, deprecated, message: "Use IMUMeasurementProvider instead")
     func saveDownloadedSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double, startUnixMs: UInt64 = 0, events: [IMUDeviceEvent]? = nil, completion: @escaping (Bool) -> Void) {
         guard !samples.isEmpty else { completion(false); return }
 

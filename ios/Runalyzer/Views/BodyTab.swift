@@ -138,11 +138,10 @@ struct BodyTab: View {
     // MARK: - History
 
     private var bodyHistory: some View {
-        List {
+        VStack(alignment: .leading, spacing: 0) {
             let bodyMeasurements = measurementStore.measurements(ofType: .bodyComp)
             if bodyMeasurements.isEmpty {
-                Text("No measurements yet").foregroundColor(.gray)
-                    .listRowBackground(Color(hex: 0x16213e))
+                Text("No measurements yet").foregroundColor(.gray).padding()
             } else {
                 ForEach(bodyMeasurements) { m in
                     NavigationLink(destination: MeasurementDetailView(measurement: m)) {
@@ -153,14 +152,19 @@ struct BodyTab: View {
                                 Text(m.summary).font(.caption).foregroundColor(.gray)
                                 Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
                             }
+                            Spacer()
+                            Image(systemName: "chevron.right").foregroundColor(.gray).font(.caption2)
                         }
+                        .padding(.horizontal).padding(.vertical, 10)
                     }
-                    .listRowBackground(Color(hex: 0x16213e))
+                    .buttonStyle(.plain)
+                    if m.id != bodyMeasurements.last?.id {
+                        Divider().background(Color.gray.opacity(0.2)).padding(.leading, 48)
+                    }
                 }
             }
         }
-        .scrollContentBackground(.hidden)
-        .background(Color(hex: 0x1a1a2e))
-        .frame(minHeight: 200)
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
     }
 }
