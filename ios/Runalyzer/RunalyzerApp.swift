@@ -24,7 +24,7 @@ struct RunalyzerApp: App {
                 .onAppear {
                     healthKit.requestAuthorization()
                     appWiring.setup(coordinator: coordinator, metrics: metrics,
-                                   store: store, sessions: sessions)
+                                   store: store, healthKit: healthKit, sessions: sessions)
                 }
                 .alert("Data Recovery", isPresented: $store.corruptDataDetected) {
                     Button("OK", role: .cancel) {}
@@ -40,22 +40,31 @@ struct RunalyzerApp: App {
     }
 }
 
-/// Manages Combine subscriptions and driver callback wiring.
-/// Rec 4: Single-loop design — adding a new device type requires only a new entry in
-/// the `handlers` dictionary inside setup(). No per-device boilerplate elsewhere.
+/// Manages Combine subscriptions, driver callback wiring, and measurement providers.
+/// Adding a new device type requires only a new entry in `handlers` + a new provider.
 class AppWiring: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var wiredDriverIDs = Set<UUID>()
     private var driverCancellables: [UUID: AnyCancellable] = [:]
 
+    // Measurement providers — self-contained pipelines
+    private var scaleProvider: ScaleMeasurementProvider?
+    private var imuProvider: IMUMeasurementProvider?
+    private var stressProvider: StressMeasurementProvider?
+
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
-               store: MeasurementStore, sessions: SessionStore) {
+               store: MeasurementStore, healthKit: HealthKitManager, sessions: SessionStore) {
+
+        // Create providers
+        scaleProvider = ScaleMeasurementProvider(measurementStore: store)
+        imuProvider = IMUMeasurementProvider(measurementStore: store)
+        stressProvider = StressMeasurementProvider(healthKit: healthKit, measurementStore: store)
 
         // Per-descriptor handlers — keyed by DeviceDescriptor.id.
-        // To add a new device: add one entry here.
+        // To add a new device: add one entry here + create a provider.
         let handlers: [String: (any DeviceDriver) -> AnyCancellable?] = [
-            "imu_sensor": Self.imuHandler(metrics: metrics, store: store, sessions: sessions),
-            "qn_scale":   Self.scaleHandler(store: store)
+            "imu_sensor": Self.imuHandler(metrics: metrics, imuProvider: imuProvider!, sessions: sessions),
+            "qn_scale":   Self.scaleHandler(scaleProvider: scaleProvider!)
         ]
 
         // L4: Update app icon badge when IMU has unsynced data
@@ -95,28 +104,32 @@ class AppWiring: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        // Trigger daily stress backfill (skips already-computed days)
+        stressProvider?.computeMissingScores()
     }
 
     // MARK: - Wiring factories
 
-    private static func imuHandler(metrics: RunMetrics, store: MeasurementStore, sessions: SessionStore)
-        -> (any DeviceDriver) -> AnyCancellable? {
-        { [weak metrics, weak store, weak sessions] driver in
+    private static func imuHandler(metrics: RunMetrics, imuProvider: IMUMeasurementProvider,
+                                   sessions: SessionStore) -> (any DeviceDriver) -> AnyCancellable? {
+        { [weak metrics, weak imuProvider, weak sessions] driver in
             guard let imu = driver as? IMUSensorDriver else { return nil }
             imu.onPacket = { [weak metrics] packet in metrics?.process(packet) }
-            imu.onDownloadComplete = { [weak store, weak sessions, weak imu] samples, status, events in
-                let source = MeasurementSource.device(
-                    type: "imu_sensor",
-                    name: imu?.displayName ?? "Runalyzer IMU",
-                    serial: imu?.id.uuidString
-                )
-                store?.saveIMUSession(
-                    samples: samples, sampleRateHz: Int(status.sampleRateHz),
+            imu.onDownloadComplete = { [weak imuProvider, weak sessions, weak imu] samples, status, events in
+                guard let imu else { return }
+
+                // Provider handles: analysis → measurement creation → save → erase
+                imuProvider?.handleDownloadComplete(
+                    samples: samples,
+                    sampleRateHz: Int(status.sampleRateHz),
                     durationSec: Double(status.recordingDurationSec),
                     startUnixMs: status.recordingStartUnixMs,
-                    events: events.isEmpty ? nil : events, source: source
-                ) { saved in if saved { imu?.eraseData() } }
+                    events: events.isEmpty ? nil : events,
+                    driver: imu
+                )
 
+                // Legacy session store (still used by session detail views)
                 sessions?.saveDownloadedSession(
                     samples: samples, sampleRateHz: Int(status.sampleRateHz),
                     durationSec: Double(status.recordingDurationSec),
@@ -128,20 +141,15 @@ class AppWiring: ObservableObject {
         }
     }
 
-    private static func scaleHandler(store: MeasurementStore) -> (any DeviceDriver) -> AnyCancellable? {
-        { [weak store] driver in
+    private static func scaleHandler(scaleProvider: ScaleMeasurementProvider) -> (any DeviceDriver) -> AnyCancellable? {
+        { [weak scaleProvider] driver in
             guard let scale = driver as? QNScaleDriver else { return nil }
             return scale.events
                 .receive(on: DispatchQueue.main)
                 .sink { event in
                     if case .measurementReady(let m) = event,
                        let result = m as? ScaleMeasurement {
-                        let source = MeasurementSource.device(
-                            type: "qn_scale",
-                            name: scale.displayName,
-                            serial: scale.id.uuidString
-                        )
-                        store?.saveBodyComp(scaleMeasurement: result, source: source)
+                        scaleProvider?.handleScaleMeasurement(result, from: scale)
                     }
                 }
         }

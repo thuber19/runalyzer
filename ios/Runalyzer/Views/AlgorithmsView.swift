@@ -87,6 +87,60 @@ struct AlgorithmsView: View {
                 )
             }
 
+            // Running Enrichment
+            Section("Running Analysis (IMU + Apple Watch)") {
+                AlgorithmCard(
+                    name: "Session Enrichment",
+                    id: "session_enrichment_v1",
+                    inputs: "IMU session (cadence, steps, duration) + Apple Watch workout (HR, distance, calories)",
+                    output: "Pace (min/km), Step length (m), Running economy (beats/km), Aerobic load (AU)",
+                    method: """
+                    Combines IMU and Watch data into a unified session record.
+
+                    Pace = duration_min / distance_km
+                    Step length = (distance_km × 1000) / total_steps
+                    Running economy = avg_HR × pace  (beats/km — lower is more aerobically efficient)
+                    Aerobic load = avg_HR × duration_min  (simple training stress proxy)
+                    """,
+                    citation: "Running economy concept adapted from standard exercise physiology literature.",
+                    journal: "Fletcher JR, et al. Running economy from a muscle energetics perspective. Front Physiol. 2017;8:433"
+                )
+            }
+
+            // Daytime Stress
+            Section("Daytime Stress (from Apple Watch)") {
+                AlgorithmCard(
+                    name: "Daytime Stress Index",
+                    id: "daytime_stress_v1",
+                    inputs: "Daytime HRV (SDNN, 06:00–23:00), Apple Watch resting HR",
+                    output: "Stress index 0–100 (higher = more stressed), plus HRV and RHR sub-components",
+                    method: """
+                    Each signal is compared against a personal 30-day rolling baseline. \
+                    Scores reflect YOUR deviation from YOUR norm — not population averages.
+
+                    HRV component (60% weight):
+                      deviation = (baseline_SDNN − day_SDNN) / baseline_SDNN
+                      score = clamp((deviation + 0.30) / 0.60 × 100, 0, 100)
+                      Maps: SDNN 30% above baseline → 0, SDNN 30% below baseline → 100
+
+                    RHR component (40% weight):
+                      deviation = (day_RHR − baseline_RHR) / baseline_RHR
+                      score = clamp((deviation + 0.10) / 0.20 × 100, 0, 100)
+                      Maps: RHR 10% below baseline → 0, RHR 10% above baseline → 100
+
+                    Data sourced from Apple Watch passive background HRV measurements (every ~2h \
+                    during sedentary rest) and Apple Watch nightly resting HR computation. \
+                    Workouts and sleep are automatically excluded by the time window filter and \
+                    because Apple Watch does not record background HRV during active workouts.
+
+                    Minimum 5 baseline days required for meaningful scoring. \
+                    Confidence reported as a separate data point.
+                    """,
+                    citation: "Zanetti S et al. Assessing Garmin Stress Level Score Against Heart Rate Variability Measurements. Stress and Health. 2025. | Cosoli G et al. Wearable Derived Cardiovascular Responses to Stressors. PMC 2023.",
+                    journal: "MDPI Sensors 2022;22(1):151 | Stress and Health 2025 | PMC10237460"
+                )
+            }
+
             // IMU Analysis
             Section("Gait Analysis (from IMU Sensor)") {
                 AlgorithmCard(

@@ -56,98 +56,17 @@ class MeasurementStore: ObservableObject {
         return saveIndex()
     }
 
-    /// Save a body composition measurement (convenience)
+    /// Batch-save multiple measurements in one index write (avoids N re-encodes).
     @discardableResult
-    func saveBodyComp(scaleMeasurement m: ScaleMeasurement, source: MeasurementSource) -> Bool {
-        let now = m.date
-        var dp: [DataPoint] = [
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.weight, value: m.weightKg, unit: "kg", source: source.id),
-            DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bmi, value: m.bmi, unit: "", source: "derived:bmi_standard"),
-        ]
-
-        if m.hasImpedance {
-            dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.impedance, value: m.impedanceOhm, unit: "Ω", source: source.id))
+    func saveBatch(_ newMeasurements: [SensorMeasurement]) -> Bool {
+        var added = 0
+        for m in newMeasurements {
+            guard !measurements.contains(where: { $0.id == m.id }) else { continue }
+            measurements.insert(m, at: 0)
+            added += 1
         }
-        if let v = m.bodyFatPercent { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bodyFatPercent, value: v, unit: "%", source: "derived:sun_et_al_2003")) }
-        if let v = m.fatMassKg { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.fatMassKg, value: v, unit: "kg", source: "derived:sun_et_al_2003")) }
-        if let v = m.fatFreeMassKg { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.fatFreeMassKg, value: v, unit: "kg", source: "derived:sun_et_al_2003")) }
-        if let v = m.muscleMassKg { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.muscleMassKg, value: v, unit: "kg", source: "derived:janssen_et_al_2000")) }
-        if let v = m.musclePercent { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.musclePercent, value: v, unit: "%", source: "derived:janssen_et_al_2000")) }
-        if let v = m.bodyWaterPercent { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bodyWaterPercent, value: v, unit: "%", source: "derived:sun_et_al_2003")) }
-        if let v = m.bmrKcal { dp.append(DataPoint(timestamp: now, endTimestamp: nil, type: DataType.bmrKcal, value: v, unit: "kcal", source: "derived:mifflin_st_jeor_1990")) }
-
-        var sources = [source]
-        if m.hasImpedance { sources.append(.algorithm(name: "body_comp_v1")) }
-
-        let measurement = SensorMeasurement(
-            id: UUID(), date: now, type: .bodyComp,
-            sources: sources,
-            dataPoints: dp, rawDataFiles: []
-        )
-        return save(measurement)
-    }
-
-    /// Save an IMU workout session (convenience)
-    func saveIMUSession(samples: [RecordedSample], sampleRateHz: Int, durationSec: Double,
-                        startUnixMs: UInt64, events: [IMUDeviceEvent]?, source: MeasurementSource,
-                        completion: @escaping (Bool) -> Void) {
-        guard !samples.isEmpty else { completion(false); return }
-
-        let dir = storageDir
-        let rawFileName = "imu_\(UUID().uuidString.prefix(8)).json"
-
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let analysis = RunMetrics.analyzeRecording(samples)
-
-            let startDate: Date
-            if startUnixMs > 0 {
-                startDate = Date(timeIntervalSince1970: Double(startUnixMs) / 1000.0)
-            } else {
-                startDate = Date().addingTimeInterval(-durationSec)
-            }
-
-            // Summary data points
-            var dp: [DataPoint] = [
-                DataPoint(timestamp: startDate, endTimestamp: nil, type: DataType.durationSec,
-                         value: durationSec, unit: "s", source: source.id),
-                DataPoint(timestamp: startDate, endTimestamp: nil, type: DataType.totalSteps,
-                         value: Double(analysis.totalSteps), unit: "steps", source: source.id),
-                DataPoint(timestamp: startDate, endTimestamp: nil, type: DataType.avgCadence,
-                         value: Double(analysis.avgCadence), unit: "spm", source: source.id),
-                DataPoint(timestamp: startDate, endTimestamp: nil, type: DataType.peakG,
-                         value: Double(analysis.peakG), unit: "g", source: source.id),
-            ]
-
-            // Windowed cadence as interval data points
-            for w in analysis.cadenceWindows {
-                let wStart = startDate.addingTimeInterval(Double(w.startMs) / 1000)
-                let wEnd = startDate.addingTimeInterval(Double(w.endMs) / 1000)
-                dp.append(DataPoint(timestamp: wStart, endTimestamp: wEnd, type: DataType.cadence,
-                                   value: Double(w.cadence), unit: "spm", source: source.id))
-            }
-
-            // Encode raw samples
-            do {
-                let rawData = try JSONEncoder().encode(samples)
-                try rawData.write(to: dir.appendingPathComponent(rawFileName),
-                                  options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-            } catch {
-                print("Failed to save IMU raw data: \(error)")
-                DispatchQueue.main.async { completion(false) }
-                return
-            }
-
-            let measurement = SensorMeasurement(
-                id: UUID(), date: startDate, type: .workout,
-                sources: [source],
-                dataPoints: dp, rawDataFiles: [rawFileName]
-            )
-
-            DispatchQueue.main.async {
-                let saved = self?.save(measurement) ?? false
-                completion(saved)
-            }
-        }
+        guard added > 0 else { return true }
+        return saveIndex()
     }
 
     // MARK: - Load Raw Data

@@ -32,17 +32,17 @@ enum SessionEnrichment {
         dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                             type: DataType.avgCadence,
                             value: Double(input.session.avgCadence),
-                            unit: "spm", source: imuSrc))
+                            unit: "spm", source: imuSrc, role: .primary))
         if let steps = input.session.totalSteps, steps > 0 {
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.totalSteps,
                                 value: Double(steps),
-                                unit: "steps", source: imuSrc))
+                                unit: "steps", source: imuSrc, role: .detail))
         }
         dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                             type: DataType.durationSec,
                             value: durationSec,
-                            unit: "s", source: imuSrc))
+                            unit: "s", source: imuSrc, role: .detail))
 
         // MARK: Apple Watch metrics (source: HK workout UUID)
         let hkSrc = DataSource.healthKit(input.workout.id)
@@ -50,19 +50,19 @@ enum SessionEnrichment {
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.heartRate,
                                 value: input.runData.avgHeartRate,
-                                unit: "bpm", source: hkSrc))
+                                unit: "bpm", source: hkSrc, role: .primary))
         }
         if distanceKm > 0 {
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.distance,
                                 value: distanceKm,
-                                unit: "km", source: hkSrc))
+                                unit: "km", source: hkSrc, role: .primary))
         }
         if input.runData.activeCalories > 0 {
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.activeCalories,
                                 value: input.runData.activeCalories,
-                                unit: "kcal", source: hkSrc))
+                                unit: "kcal", source: hkSrc, role: .detail))
         }
 
         // MARK: Derived metrics
@@ -74,7 +74,7 @@ enum SessionEnrichment {
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.pace,
                                 value: pace,
-                                unit: "min/km", source: derivedSrc))
+                                unit: "min/km", source: derivedSrc, role: .primary))
         }
 
         // Step length (m/step) from Watch distance + IMU step count
@@ -83,19 +83,17 @@ enum SessionEnrichment {
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.stepLength,
                                 value: stepLengthM,
-                                unit: "m", source: derivedSrc))
+                                unit: "m", source: derivedSrc, role: .detail))
         }
 
         // Running economy proxy: beats/km = avgHR × pace (min/km)
-        // Lower value = less HR cost per km = more efficient aerobically.
-        // Not a true VO2-based economy score, but a useful relative training metric.
         if input.runData.avgHeartRate > 0 && distanceKm > 0 && durationSec > 0 {
             let pace = (durationSec / 60.0) / distanceKm
             let economy = input.runData.avgHeartRate * pace
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.runningEconomy,
                                 value: economy,
-                                unit: "beats/km", source: derivedSrc))
+                                unit: "beats/km", source: derivedSrc, role: .detail))
         }
 
         // Aerobic load: avgHR × duration_min — a simple session training stress score
@@ -104,7 +102,7 @@ enum SessionEnrichment {
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.aerobicLoad,
                                 value: load,
-                                unit: "AU", source: derivedSrc))
+                                unit: "AU", source: derivedSrc, role: .detail))
         }
 
         // MARK: Sources list

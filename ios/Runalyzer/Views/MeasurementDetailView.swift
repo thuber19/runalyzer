@@ -54,52 +54,74 @@ struct MeasurementDetailView: View {
     // MARK: - Data Points
 
     private var dataPointsView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("DATA").font(.caption2).foregroundColor(.gray)
+        let primaryPoints = measurement.dataPoints.filter { $0.role == .primary }
+        let detailPoints  = measurement.dataPoints.filter { $0.role == .detail }
 
-            // Group by type for cleaner display
-            let grouped = Dictionary(grouping: measurement.dataPoints) { $0.type }
-            let sortedKeys = grouped.keys.sorted()
+        return VStack(alignment: .leading, spacing: 8) {
+            // Primary data — shown prominently
+            if !primaryPoints.isEmpty {
+                Text("DATA").font(.caption2).foregroundColor(.gray)
+                dataPointSection(primaryPoints, style: .primary)
+            }
 
-            ForEach(sortedKeys, id: \.self) { key in
-                let points = grouped[key]!
-
-                if points.count == 1, let p = points.first {
-                    // Single value — show inline
-                    dataRow(label: displayName(for: p.type), value: formatValue(p), unit: p.unit, source: shortSource(p.source))
-                } else {
-                    // Multiple values (time series) — show summary
-                    let values = points.map(\.value)
-                    let avg = values.reduce(0, +) / Double(values.count)
-                    let min = values.min() ?? 0
-                    let max = values.max() ?? 0
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(displayName(for: key)).font(.subheadline).foregroundColor(.white)
-                        HStack(spacing: 16) {
-                            VStack {
-                                Text(String(format: "%.1f", avg)).font(.headline.monospacedDigit())
-                                Text("Avg").font(.caption2).foregroundColor(.gray)
-                            }
-                            VStack {
-                                Text(String(format: "%.1f", min)).font(.headline.monospacedDigit())
-                                Text("Min").font(.caption2).foregroundColor(.gray)
-                            }
-                            VStack {
-                                Text(String(format: "%.1f", max)).font(.headline.monospacedDigit())
-                                Text("Max").font(.caption2).foregroundColor(.gray)
-                            }
-                            Spacer()
-                            Text("\(points.count) points")
-                                .font(.caption2).foregroundColor(.gray)
-                        }
-                    }
-                    .padding(.vertical, 4)
+            // Detail data — collapsible
+            if !detailPoints.isEmpty {
+                DisclosureGroup {
+                    dataPointSection(detailPoints, style: .detail)
+                } label: {
+                    Text("DETAILS").font(.caption2).foregroundColor(.gray)
                 }
+                .tint(.gray)
             }
         }
         .padding()
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
+    }
+
+    private enum DataPointStyle { case primary, detail }
+
+    @ViewBuilder
+    private func dataPointSection(_ points: [DataPoint], style: DataPointStyle) -> some View {
+        let grouped = Dictionary(grouping: points) { $0.type }
+        let sortedKeys = grouped.keys.sorted()
+
+        ForEach(sortedKeys, id: \.self) { key in
+            let pts = grouped[key]!
+
+            if pts.count == 1, let p = pts.first {
+                dataRow(label: displayName(for: p.type), value: formatValue(p),
+                        unit: p.unit, source: shortSource(p.source))
+            } else {
+                let values = pts.map(\.value)
+                let avg = values.reduce(0, +) / Double(values.count)
+                let mn = values.min() ?? 0
+                let mx = values.max() ?? 0
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(displayName(for: key))
+                        .font(style == .primary ? .subheadline : .caption)
+                        .foregroundColor(.white)
+                    HStack(spacing: 16) {
+                        VStack {
+                            Text(String(format: "%.1f", avg)).font(.headline.monospacedDigit())
+                            Text("Avg").font(.caption2).foregroundColor(.gray)
+                        }
+                        VStack {
+                            Text(String(format: "%.1f", mn)).font(.headline.monospacedDigit())
+                            Text("Min").font(.caption2).foregroundColor(.gray)
+                        }
+                        VStack {
+                            Text(String(format: "%.1f", mx)).font(.headline.monospacedDigit())
+                            Text("Max").font(.caption2).foregroundColor(.gray)
+                        }
+                        Spacer()
+                        Text("\(pts.count) points")
+                            .font(.caption2).foregroundColor(.gray)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
     }
 
     private func dataRow(label: String, value: String, unit: String, source: String) -> some View {
@@ -223,6 +245,15 @@ struct MeasurementDetailView: View {
         case DataType.stepLength: return "Step Length"
         case DataType.runningEconomy: return "Running Economy"
         case DataType.aerobicLoad: return "Aerobic Load"
+        case DataType.stressIndex: return "Stress Index"
+        case DataType.stressHRVComponent: return "HRV Stress Component"
+        case DataType.stressRHRComponent: return "RHR Stress Component"
+        case DataType.stressSDNNavg: return "SDNN (avg)"
+        case DataType.stressSDNNmin: return "SDNN (min)"
+        case DataType.stressSDNNmax: return "SDNN (max)"
+        case DataType.stressSDNNcount: return "HRV Readings"
+        case DataType.stressRestingHR: return "Resting HR"
+        case DataType.stressConfidence: return "Confidence"
         default: return type.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
@@ -238,6 +269,14 @@ struct MeasurementDetailView: View {
             return String(format: "%d:%02d", m, s)
         case DataType.stepLength:
             return String(format: "%.3f", p.value)
+        case DataType.stressIndex, DataType.stressHRVComponent, DataType.stressRHRComponent:
+            return String(Int(p.value.rounded()))
+        case DataType.stressSDNNavg, DataType.stressSDNNmin, DataType.stressSDNNmax:
+            return String(format: "%.1f", p.value)
+        case DataType.stressSDNNcount:
+            return String(Int(p.value))
+        case DataType.stressConfidence:
+            return String(format: "%.0f%%", p.value * 100)
         default:
             return String(format: "%.2f", p.value)
         }
@@ -245,7 +284,12 @@ struct MeasurementDetailView: View {
 
     private func shortSource(_ source: String) -> String {
         if source.hasPrefix("derived:") { return String(source.dropFirst(8)) }
-        if source.hasPrefix("hk:")      { return "Watch" }
+        if source.hasPrefix("hk:") {
+            let name = String(source.dropFirst(3))
+            // Legacy generic fallback
+            if name.isEmpty || name == "apple_watch" { return "Watch" }
+            return name  // real HK source name e.g. "Apple Watch", "iPhone"
+        }
         if source.hasPrefix("device:")  { return "IMU" }
         return ""
     }

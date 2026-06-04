@@ -245,22 +245,8 @@ struct SessionDetailView: View {
     // MARK: - Session Enrichment
 
     private func saveEnrichment(workout: AppleWorkout, runData: AppleRunData) {
-        // Don't create a duplicate if one already exists for this session+workout pair
-        let alreadyEnriched = measurementStore.measurements.contains { m in
-            m.type == .derived &&
-            m.sources.contains { $0.serialNumber == DataSource.healthKit(workout.id) }
-        }
-        guard !alreadyEnriched else { return }
-
-        let imuID = SessionEnrichment.findIMUMeasurement(for: session, in: measurementStore)
-        let input = SessionEnrichment.Input(
-            session: session,
-            workout: workout,
-            runData: runData,
-            imuMeasurementID: imuID
-        )
-        let derived = SessionEnrichment.compute(input)
-        measurementStore.save(derived)
+        let provider = EnrichmentProvider(measurementStore: measurementStore)
+        provider.enrichSession(session, workout: workout, runData: runData)
     }
 
     // MARK: - Export

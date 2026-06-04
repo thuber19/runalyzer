@@ -1,5 +1,14 @@
 import Foundation
 
+// MARK: - Data Point Role
+
+/// Controls UI display: primary values are headline metrics shown prominently,
+/// detail values are supporting info shown in expanded/collapsible sections.
+enum DataPointRole: String, Codable {
+    case primary   // headline values (weight, stress_index, pace)
+    case detail    // supporting values (impedance, confidence, SDNN min/max)
+}
+
 // MARK: - Data Point (universal unit of measurement)
 
 struct DataPoint: Codable, Identifiable {
@@ -10,10 +19,30 @@ struct DataPoint: Codable, Identifiable {
     let type: String            // "heart_rate", "cadence", "weight", "accel_x", etc.
     let value: Double
     let unit: String            // "bpm", "spm", "kg", "g", "dps", "ohm", "%", "kcal", etc.
-    let source: String          // device serial or "derived:algorithm_name"
+    let source: String          // "device:serial", "hk:source_name", "derived:algorithm"
+    let role: DataPointRole     // .primary = headline, .detail = supporting
 
     private enum CodingKeys: String, CodingKey {
-        case timestamp, endTimestamp, type, value, unit, source
+        case timestamp, endTimestamp, type, value, unit, source, role
+    }
+
+    // Backward-compatible decoding: old JSON without `role` defaults to .primary
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        timestamp = try c.decode(Date.self, forKey: .timestamp)
+        endTimestamp = try c.decodeIfPresent(Date.self, forKey: .endTimestamp)
+        type = try c.decode(String.self, forKey: .type)
+        value = try c.decode(Double.self, forKey: .value)
+        unit = try c.decode(String.self, forKey: .unit)
+        source = try c.decode(String.self, forKey: .source)
+        role = (try c.decodeIfPresent(DataPointRole.self, forKey: .role)) ?? .primary
+    }
+
+    init(timestamp: Date, endTimestamp: Date?, type: String, value: Double,
+         unit: String, source: String, role: DataPointRole = .primary) {
+        self.timestamp = timestamp; self.endTimestamp = endTimestamp
+        self.type = type; self.value = value; self.unit = unit
+        self.source = source; self.role = role
     }
 }
 
@@ -76,6 +105,20 @@ struct SensorMeasurement: Codable, Identifiable {
             let fat = dataPoints.first(where: { $0.type == "body_fat_percent" })?.value ?? 0
             return String(format: "%.1f kg · %.1f%% fat", weight, fat)
         case .derived:
+            // Daytime stress score
+            if let stress = dataPoints.first(where: { $0.type == DataType.stressIndex }) {
+                let level = Int(stress.value.rounded())
+                let label: String
+                switch stress.value {
+                case ..<30: label = "Low"
+                case ..<60: label = "Moderate"
+                default:    label = "High"
+                }
+                let conf = dataPoints.first(where: { $0.type == DataType.stressConfidence })?.value ?? 1.0
+                let confStr = conf < 0.6 ? " · partial" : ""
+                return "Stress \(level) · \(label)\(confStr)"
+            }
+            // Running enrichment
             let dist = dataPoints.first(where: { $0.type == DataType.distance })?.value ?? 0
             let pace = dataPoints.first(where: { $0.type == DataType.pace })?.value ?? 0
             let hr   = dataPoints.first(where: { $0.type == DataType.heartRate })?.value ?? 0
@@ -153,17 +196,27 @@ enum DataSource {
     static func device(_ serial: String) -> String { "device:\(serial)" }
     static func healthKit(_ uuid: UUID) -> String { "hk:\(uuid.uuidString)" }
     static func derived(_ algorithm: String) -> String { "derived:\(algorithm)" }
+    /// HealthKit source by name (from HKSample.sourceRevision.source.name, e.g. "Apple Watch")
+    static func healthKitSource(_ name: String) -> String { "hk:\(name)" }
 }
 
 // MARK: - MeasurementSource factories (extending existing ones)
 
 extension MeasurementSource {
-    /// Source backed by an Apple Health / HealthKit record.
+    /// Source backed by an Apple Health / HealthKit record (specific workout).
     static func healthKit(workoutID: UUID, name: String = "Apple Watch") -> MeasurementSource {
         MeasurementSource(deviceType: "apple_watch",
                           deviceName: name,
                           serialNumber: DataSource.healthKit(workoutID),
                           algorithmName: nil)
+    }
+
+    /// Source backed by HealthKit aggregate data (no specific object UUID).
+    /// Derives deviceType from the HK source name (e.g. "Apple Watch" → "apple_watch").
+    static func healthKitDevice(name: String) -> MeasurementSource {
+        let type = name.lowercased().contains("watch") ? "apple_watch" : "apple_health"
+        return MeasurementSource(deviceType: type, deviceName: name,
+                                 serialNumber: nil, algorithmName: nil)
     }
 }
 
@@ -208,4 +261,15 @@ enum DataType {
 
     // Derived — general
     static let sleepScore = "sleep_score"
+
+    // Daytime stress (daytime_stress_v1)
+    static let stressIndex        = "stress_index"          // 0–100 composite
+    static let stressHRVComponent = "stress_hrv_component"  // 0–100 from SDNN deviation
+    static let stressRHRComponent = "stress_rhr_component"  // 0–100 from RHR deviation
+    static let stressSDNNavg      = "stress_sdnn_avg"       // mean daytime SDNN (ms)
+    static let stressSDNNmin      = "stress_sdnn_min"       // min daytime SDNN (ms)
+    static let stressSDNNmax      = "stress_sdnn_max"       // max daytime SDNN (ms)
+    static let stressSDNNcount    = "stress_sdnn_count"     // number of HRV readings
+    static let stressRestingHR    = "stress_resting_hr"     // Apple Watch resting HR (bpm)
+    static let stressConfidence   = "stress_confidence"     // 0–1 data quality
 }

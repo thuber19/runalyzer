@@ -132,6 +132,8 @@ class HealthKitManager: ObservableObject {
         types.insert(HKQuantityType.quantityType(forIdentifier: .stepCount)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)
+        types.insert(HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!)
+        types.insert(HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!)
         types.insert(HKObjectType.workoutType())
         types.insert(HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!)
         return types
@@ -413,6 +415,105 @@ class HealthKitManager: ObservableObject {
         store.execute(query)
     }
 
+    // MARK: - Daytime Stress
+
+    /// Fetch raw inputs for daytime stress computation over the requested number of days,
+    /// plus an extra 30-day window used solely for baseline calculation.
+    /// Calls back on the main queue with one entry per calendar day (oldest first).
+    func fetchStressHistory(days: Int, completion: @escaping ([DaytimeStress.DayInputs]) -> Void) {
+        let cal = Calendar.current
+        let now = Date()
+        let totalDays = days + DaytimeStress.baselineWindowDays
+        guard let rangeStart = cal.date(byAdding: .day, value: -totalDays,
+                                        to: cal.startOfDay(for: now)) else {
+            completion([]); return
+        }
+
+        let predicate = HKQuery.predicateForSamples(withStart: rangeStart, end: now,
+                                                    options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let group = DispatchGroup()
+
+        // Each tuple carries the HK source name from sourceRevision.source.name
+        var allSDNN: [(date: Date, value: Double, sourceName: String)] = []
+        var allRHR:  [(date: Date, value: Double, sourceName: String)] = []
+
+        // SDNN samples (ms) — with source name from HealthKit
+        group.enter()
+        if let sdnnType = HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN) {
+            let unit = HKUnit.secondUnit(with: .milli)
+            let q = HKSampleQuery(sampleType: sdnnType, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, results, error in
+                if let error { AppLogger.health.error("SDNN query: \(error.localizedDescription)") }
+                allSDNN = (results as? [HKQuantitySample] ?? []).map {
+                    (date: $0.startDate,
+                     value: $0.quantity.doubleValue(for: unit),
+                     sourceName: $0.sourceRevision.source.name)
+                }
+                group.leave()
+            }
+            store.execute(q)
+        } else { group.leave() }
+
+        // Resting HR (bpm) — Apple Watch computes this nightly
+        group.enter()
+        if let rhrType = HKQuantityType.quantityType(forIdentifier: .restingHeartRate) {
+            let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+            let q = HKSampleQuery(sampleType: rhrType, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, results, error in
+                if let error { AppLogger.health.error("RHR query: \(error.localizedDescription)") }
+                allRHR = (results as? [HKQuantitySample] ?? []).map {
+                    (date: $0.startDate,
+                     value: $0.quantity.doubleValue(for: bpmUnit),
+                     sourceName: $0.sourceRevision.source.name)
+                }
+                group.leave()
+            }
+            store.execute(q)
+        } else { group.leave() }
+
+        group.notify(queue: .global(qos: .userInitiated)) {
+            // Group SDNN by day — daytime only (06:00–23:00), preserving source name
+            var sdnnByDay: [Date: [(value: Double, sourceName: String)]] = [:]
+            for s in allSDNN {
+                let hour = cal.component(.hour, from: s.date)
+                guard hour >= 6 && hour < 23 else { continue }
+                let day = cal.startOfDay(for: s.date)
+                sdnnByDay[day, default: []].append((value: s.value, sourceName: s.sourceName))
+            }
+
+            // Group RHR by day — keep the minimum value and its source
+            var rhrByDay: [Date: (value: Double, sourceName: String)] = [:]
+            for r in allRHR {
+                let day = cal.startOfDay(for: r.date)
+                if let existing = rhrByDay[day] {
+                    if r.value < existing.value {
+                        rhrByDay[day] = (value: r.value, sourceName: r.sourceName)
+                    }
+                } else {
+                    rhrByDay[day] = (value: r.value, sourceName: r.sourceName)
+                }
+            }
+
+            // Build ordered array: one entry per calendar day from rangeStart to today
+            var inputs: [DaytimeStress.DayInputs] = []
+            var cursor = rangeStart
+            let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!
+            while cursor < tomorrow {
+                let rhrEntry = rhrByDay[cursor]
+                inputs.append(DaytimeStress.DayInputs(
+                    date: cursor,
+                    sdnnSamples: sdnnByDay[cursor] ?? [],
+                    restingHR: rhrEntry?.value,
+                    restingHRSource: rhrEntry?.sourceName
+                ))
+                cursor = cal.date(byAdding: .day, value: 1, to: cursor)!
+            }
+
+            DispatchQueue.main.async { completion(inputs) }
+        }
+    }
+
     // MARK: - Debug: dump all data types available for a time range
     func debugDump(from startDate: Date, to endDate: Date, completion: @escaping (String) -> Void) {
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
@@ -421,6 +522,8 @@ class HealthKitManager: ObservableObject {
 
         let typesToCheck: [(String, HKQuantityTypeIdentifier, HKUnit)] = [
             ("Heart Rate", .heartRate, HKUnit.count().unitDivided(by: .minute())),
+            ("HRV SDNN", .heartRateVariabilitySDNN, HKUnit.secondUnit(with: .milli)),
+            ("Resting Heart Rate", .restingHeartRate, HKUnit.count().unitDivided(by: .minute())),
             ("Step Count", .stepCount, .count()),
             ("Distance", .distanceWalkingRunning, .meter()),
             ("Active Calories", .activeEnergyBurned, .kilocalorie()),
@@ -487,6 +590,38 @@ class HealthKitManager: ObservableObject {
             group.leave()
         }
         store.execute(workoutQuery)
+
+        // Sleep analysis (HKCategoryType — separate from quantity types above)
+        group.enter()
+        if let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
+            let sleepSort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+            let sleepQuery = HKSampleQuery(sampleType: sleepType, predicate: predicate,
+                                           limit: HKObjectQueryNoLimit, sortDescriptors: [sleepSort]) { _, results, error in
+                let samples = results as? [HKCategorySample] ?? []
+                var part = "[Sleep Analysis] \(samples.count) samples"
+                if let e = error { part += " (error: \(e.localizedDescription))" }
+                part += "\n"
+                for s in samples.prefix(10) {
+                    let stage: String
+                    switch HKCategoryValueSleepAnalysis(rawValue: s.value) {
+                    case .inBed:              stage = "InBed"
+                    case .asleepCore:         stage = "Core"
+                    case .asleepREM:          stage = "REM"
+                    case .asleepDeep:         stage = "Deep"
+                    case .awake:              stage = "Awake"
+                    case .asleepUnspecified, .asleep: stage = "Asleep"
+                    default:                  stage = "Unknown(\(s.value))"
+                    }
+                    let dur = Int(s.endDate.timeIntervalSince(s.startDate) / 60)
+                    part += "  \(stage) \(s.startDate) → \(s.endDate) (\(dur)min) [\(s.sourceRevision.source.name)]\n"
+                }
+                if samples.count > 10 { part += "  ... (\(samples.count - 10) more)\n" }
+                part += "\n"
+                serialQueue.sync { outputParts.append(part) }
+                group.leave()
+            }
+            store.execute(sleepQuery)
+        } else { group.leave() }
 
         group.notify(queue: .main) {
             completion(outputParts.joined())
