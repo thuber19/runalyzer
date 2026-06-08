@@ -37,18 +37,12 @@ struct ScaleSettingsView: View {
                 .listRowBackground(Color(hex: 0x16213e))
             }
 
-            Section("Heart Rate Zones") {
-                let defaults = defaultZones
-                hrZoneRow("Zone 1 max", value: $profile.hrZone1Max, defaultValue: defaults[0])
-                hrZoneRow("Zone 2 max", value: $profile.hrZone2Max, defaultValue: defaults[1])
-                hrZoneRow("Zone 3 max", value: $profile.hrZone3Max, defaultValue: defaults[2])
-                hrZoneRow("Zone 4 max", value: $profile.hrZone4Max, defaultValue: defaults[3])
+            Section {
+                // Max HR
                 HStack {
                     Text("Max HR")
                     Spacer()
-                    TextField("\(220 - profile.age)", value: $profile.maxHROverride, format: .number)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
+                    OptionalIntField(placeholder: "\(220 - profile.age)", value: $profile.maxHROverride)
                         .frame(width: 60)
                     Text("bpm").foregroundColor(.gray)
                 }
@@ -58,6 +52,29 @@ struct ScaleSettingsView: View {
                         .font(.caption2).foregroundColor(.gray)
                         .listRowBackground(Color(hex: 0x16213e))
                 }
+
+                // Zone boundaries (auto-calculated, overridable)
+                let mhr = profile.maxHR
+                let lowers = profile.hrZoneLowerBounds
+                zoneRow("Zone 1 · Very Light", range: "\(lowers[0])–", value: $profile.hrZone1Max,
+                        defaultValue: Int(Double(mhr) * 0.6), pct: "50–60%")
+                zoneRow("Zone 2 · Light", range: "\(lowers[1])–", value: $profile.hrZone2Max,
+                        defaultValue: Int(Double(mhr) * 0.7), pct: "60–70%")
+                zoneRow("Zone 3 · Moderate", range: "\(lowers[2])–", value: $profile.hrZone3Max,
+                        defaultValue: Int(Double(mhr) * 0.8), pct: "70–80%")
+                zoneRow("Zone 4 · Hard", range: "\(lowers[3])–", value: $profile.hrZone4Max,
+                        defaultValue: Int(Double(mhr) * 0.9), pct: "80–90%")
+                HStack {
+                    Text("Zone 5 · Maximum").font(.subheadline)
+                    Spacer()
+                    Text("\(lowers[4])–\(mhr) bpm").foregroundColor(.gray)
+                    Text("90–100%").font(.caption2).foregroundColor(.gray)
+                }
+                .listRowBackground(Color(hex: 0x16213e))
+            } header: {
+                Text("Heart Rate Zones")
+            } footer: {
+                Text("Based on ACSM Guidelines for Exercise Testing and Prescription (11th ed., 2021). Zones are percentages of max HR. Override individual zone boundaries or leave blank for defaults.")
             }
 
             Section {
@@ -84,22 +101,37 @@ struct ScaleSettingsView: View {
         .navigationTitle("Body Profile")
     }
 
-    /// Default zone boundaries based on current age
-    private var defaultZones: [Int] {
-        let mhr = Double(profile.maxHR)
-        return [Int(mhr * 0.6), Int(mhr * 0.7), Int(mhr * 0.8), Int(mhr * 0.9)]
-    }
-
-    private func hrZoneRow(_ label: String, value: Binding<Int?>, defaultValue: Int) -> some View {
+    private func zoneRow(_ label: String, range: String, value: Binding<Int?>, defaultValue: Int, pct: String) -> some View {
         HStack {
-            Text(label)
+            Text(label).font(.subheadline)
             Spacer()
-            TextField("\(defaultValue)", value: value, format: .number)
-                .keyboardType(.numberPad)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 60)
-            Text("bpm").foregroundColor(.gray)
+            Text(range).font(.caption).foregroundColor(.gray)
+            OptionalIntField(placeholder: "\(defaultValue)", value: value)
+                .frame(width: 50)
+            Text("bpm").font(.caption2).foregroundColor(.gray)
+            Text(pct).font(.caption2).foregroundColor(.gray).frame(width: 50)
         }
         .listRowBackground(Color(hex: 0x16213e))
+    }
+}
+
+/// TextField that properly handles Optional<Int> — empty field = nil.
+private struct OptionalIntField: View {
+    let placeholder: String
+    @Binding var value: Int?
+    @State private var text: String = ""
+
+    var body: some View {
+        TextField(placeholder, text: $text)
+            .keyboardType(.numberPad)
+            .multilineTextAlignment(.trailing)
+            .onAppear { text = value.map(String.init) ?? "" }
+            .onChange(of: text) { _, newText in
+                if newText.isEmpty {
+                    value = nil
+                } else if let n = Int(newText) {
+                    value = n
+                }
+            }
     }
 }

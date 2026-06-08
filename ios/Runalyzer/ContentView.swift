@@ -23,11 +23,6 @@ struct ContentView: View {
                     Label("Data", systemImage: "cylinder.split.1x2")
                 }
 
-            HealthView()
-                .tabItem {
-                    Label("Health", systemImage: "heart.fill")
-                }
-
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape")

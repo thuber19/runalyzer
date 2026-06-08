@@ -34,15 +34,30 @@ struct UserProfile: Codable, Equatable {
     /// Max heart rate — uses custom value if set, otherwise 220 - age.
     var maxHR: Int { maxHROverride ?? (220 - age) }
 
-    /// HR zone boundaries in bpm (uses custom values if set, otherwise defaults from age)
+    /// HR zone boundaries in bpm.
+    /// Defaults: Karvonen zones at 50/60/70/80/90% of max HR.
+    /// Reference: American College of Sports Medicine (ACSM) Guidelines for
+    /// Exercise Testing and Prescription, 11th ed., 2021.
     var hrZones: [(name: String, maxBPM: Int, color: String)] {
         let mhr = maxHR
         return [
-            ("Zone 1", hrZone1Max ?? Int(Double(mhr) * 0.6), "gray"),
-            ("Zone 2", hrZone2Max ?? Int(Double(mhr) * 0.7), "blue"),
-            ("Zone 3", hrZone3Max ?? Int(Double(mhr) * 0.8), "green"),
-            ("Zone 4", hrZone4Max ?? Int(Double(mhr) * 0.9), "orange"),
-            ("Zone 5", mhr, "red"),
+            ("Zone 1", hrZone1Max ?? Int(Double(mhr) * 0.6), "gray"),      // 50–60% Very Light
+            ("Zone 2", hrZone2Max ?? Int(Double(mhr) * 0.7), "blue"),      // 60–70% Light
+            ("Zone 3", hrZone3Max ?? Int(Double(mhr) * 0.8), "green"),     // 70–80% Moderate
+            ("Zone 4", hrZone4Max ?? Int(Double(mhr) * 0.9), "orange"),    // 80–90% Hard
+            ("Zone 5", mhr, "red"),                                         // 90–100% Maximum
+        ]
+    }
+
+    /// Zone lower bounds for display
+    var hrZoneLowerBounds: [Int] {
+        let mhr = maxHR
+        return [
+            Int(Double(mhr) * 0.5),  // Zone 1 starts at 50%
+            hrZone1Max ?? Int(Double(mhr) * 0.6),  // Zone 2 starts
+            hrZone2Max ?? Int(Double(mhr) * 0.7),  // Zone 3 starts
+            hrZone3Max ?? Int(Double(mhr) * 0.8),  // Zone 4 starts
+            hrZone4Max ?? Int(Double(mhr) * 0.9),  // Zone 5 starts
         ]
     }
 

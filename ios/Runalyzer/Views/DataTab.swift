@@ -7,7 +7,6 @@ private enum DataFilter: String, CaseIterable {
     case bodyComp   = "Body Comp"
     case metric     = "Metrics"
     case recovery   = "Recovery"
-    case running    = "Running"
 }
 
 /// Unified view of ALL measurements from all sources
@@ -28,7 +27,6 @@ struct DataTab: View {
         case .bodyComp:  return sorted.filter { $0.type == .bodyComp }
         case .metric:    return sorted.filter { $0.type == .metric }
         case .recovery:  return sorted.filter { isRecovery($0) }
-        case .running:   return sorted.filter { isRunning($0) }
         }
     }
 
@@ -136,7 +134,6 @@ struct DataTab: View {
 
     private func iconColor(_ m: SensorMeasurement) -> Color {
         if isRecovery(m) { return Color(hex: 0xf4a261) }
-        if isRunning(m) { return Color(hex: 0x5dadec) }
         switch m.type {
         case .workout:   return Color(hex: 0xe94560)
         case .hkWorkout: return .pink
@@ -150,7 +147,4 @@ struct DataTab: View {
         m.type == .derived && m.dataPoints.contains { $0.type == DataType.recoveryIndex }
     }
 
-    private func isRunning(_ m: SensorMeasurement) -> Bool {
-        m.type == .derived && m.dataPoints.contains { $0.type == DataType.pace || $0.type == DataType.distance }
-    }
 }

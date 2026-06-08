@@ -247,13 +247,13 @@ struct MeasurementDetailView: View {
         let profileZones = profile.hrZones
         let colors: [Color] = [.gray, .blue, .green, .orange, .red]
 
-        // Build ranges from zone boundaries
+        // Build ranges from zone boundaries (Zone 1 starts at 50% of max HR)
+        let lowerBounds = profile.hrZoneLowerBounds
         var ranges: [(String, ClosedRange<Double>, Color)] = []
-        var lowerBound: Double = 0
         for (i, zone) in profileZones.enumerated() {
+            let lower = Double(lowerBounds[i])
             let upper = Double(zone.maxBPM)
-            ranges.append((zone.name, lowerBound...upper, colors[min(i, colors.count - 1)]))
-            lowerBound = upper + 1
+            ranges.append((zone.name, lower...upper, colors[min(i, colors.count - 1)]))
         }
 
         // Calculate time per zone using actual intervals between consecutive samples

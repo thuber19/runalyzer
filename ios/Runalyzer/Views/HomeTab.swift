@@ -192,11 +192,12 @@ struct HomeTab: View {
     // MARK: - Sleep Tile
 
     private var sleepTile: some View {
+        // Find the most recent sleep measurement (today or yesterday)
         let today = cal.startOfDay(for: Date())
-        let yesterday = cal.date(byAdding: .day, value: -1, to: today)!
-        // Sleep assigned to wake-up day — check today first, then yesterday
-        let sleepPoints = metricIndex.query(type: DataType.sleepStage, measurementType: .metric,
-                                            from: yesterday, to: Date())
+        let sleepMeasurement = metricIndex.metricMeasurement(forDay: today, containingType: DataType.sleepStage)
+            ?? metricIndex.metricMeasurement(forDay: cal.date(byAdding: .day, value: -1, to: today)!,
+                                             containingType: DataType.sleepStage)
+        let sleepPoints = sleepMeasurement?.dataPoints.filter { $0.type == DataType.sleepStage } ?? []
 
         // Prefer Watch staged data over generic iPhone data
         let hasStages = sleepPoints.contains { ["Core", "Deep", "REM"].contains($0.unit) }
