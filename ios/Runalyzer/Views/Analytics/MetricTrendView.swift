@@ -30,7 +30,8 @@ struct MetricTrendView: View {
 
     private var dataPoints: [DataPoint] {
         guard let start = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) else { return [] }
-        return metricIndex.query(type: metricType, measurementType: .metric, from: start, to: Date())
+        // Query across ALL measurement types (metrics are .metric, recovery is .derived, etc.)
+        return metricIndex.query(type: metricType, from: start, to: Date())
     }
 
     private var aggregates: [MetricAggregator.DailyAggregate] {
