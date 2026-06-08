@@ -131,9 +131,13 @@ class HealthKitManager: ObservableObject {
         types.insert(HKQuantityType.quantityType(forIdentifier: .heartRate)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .stepCount)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!)
+        types.insert(HKQuantityType.quantityType(forIdentifier: .distanceCycling)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!)
         types.insert(HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!)
+        types.insert(HKQuantityType.quantityType(forIdentifier: .oxygenSaturation)!)
+        types.insert(HKQuantityType.quantityType(forIdentifier: .bodyTemperature)!)
+        types.insert(HKQuantityType.quantityType(forIdentifier: .vo2Max)!)
         types.insert(HKObjectType.workoutType())
         types.insert(HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!)
         return types
@@ -415,15 +419,15 @@ class HealthKitManager: ObservableObject {
         store.execute(query)
     }
 
-    // MARK: - Daytime Stress
+    // MARK: - Legacy Stress Methods (deprecated — use MetricIndex + RecoveryScore)
 
-    /// Fetch raw inputs for daytime stress computation over the requested number of days,
+    /// Fetch raw inputs for stress computation over the requested number of days,
     /// plus an extra 30-day window used solely for baseline calculation.
     /// Calls back on the main queue with one entry per calendar day (oldest first).
-    func fetchStressHistory(days: Int, completion: @escaping ([DaytimeStress.DayInputs]) -> Void) {
+    func fetchStressHistory(days: Int, completion: @escaping ([RecoveryScore.DayInputs]) -> Void) {
         let cal = Calendar.current
         let now = Date()
-        let totalDays = days + DaytimeStress.baselineWindowDays
+        let totalDays = days + RecoveryScore.baselineWindowDays
         guard let rangeStart = cal.date(byAdding: .day, value: -totalDays,
                                         to: cal.startOfDay(for: now)) else {
             completion([]); return
@@ -496,12 +500,12 @@ class HealthKitManager: ObservableObject {
             }
 
             // Build ordered array: one entry per calendar day from rangeStart to today
-            var inputs: [DaytimeStress.DayInputs] = []
+            var inputs: [RecoveryScore.DayInputs] = []
             var cursor = rangeStart
             let tomorrow = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))!
             while cursor < tomorrow {
                 let rhrEntry = rhrByDay[cursor]
-                inputs.append(DaytimeStress.DayInputs(
+                inputs.append(RecoveryScore.DayInputs(
                     date: cursor,
                     sdnnSamples: sdnnByDay[cursor] ?? [],
                     restingHR: rhrEntry?.value,
@@ -515,11 +519,11 @@ class HealthKitManager: ObservableObject {
     }
 
     /// Fetch stress inputs for a single day (lightweight — for incremental daily computation).
-    func fetchStressInputsForDay(_ date: Date, completion: @escaping (DaytimeStress.DayInputs) -> Void) {
+    func fetchStressInputsForDay(_ date: Date, completion: @escaping (RecoveryScore.DayInputs) -> Void) {
         let cal = Calendar.current
         let dayStart = cal.startOfDay(for: date)
         guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else {
-            completion(DaytimeStress.DayInputs(date: dayStart, sdnnSamples: [], restingHR: nil, restingHRSource: nil))
+            completion(RecoveryScore.DayInputs(date: dayStart, sdnnSamples: [], restingHR: nil, restingHRSource: nil))
             return
         }
 
@@ -562,11 +566,240 @@ class HealthKitManager: ObservableObject {
         } else { group.leave() }
 
         group.notify(queue: .main) {
-            completion(DaytimeStress.DayInputs(
+            completion(RecoveryScore.DayInputs(
                 date: dayStart, sdnnSamples: sdnnSamples,
                 restingHR: rhrValue, restingHRSource: rhrSource
             ))
         }
+    }
+
+    // MARK: - Workout Details Fetch
+
+    struct WorkoutDetail {
+        let id: UUID
+        let startDate: Date
+        let endDate: Date
+        let duration: Double
+        let activityName: String
+        let distanceKm: Double
+        let calories: Double
+        let avgHeartRate: Double
+        let maxHeartRate: Double
+        let sourceName: String
+    }
+
+    /// Fetch workouts with HR samples and statistics. Calls back on a background queue.
+    func fetchWorkoutsWithDetails(
+        from startDate: Date, to endDate: Date,
+        completion: @escaping ([WorkoutDetail]) -> Void
+    ) {
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+        let query = HKSampleQuery(
+            sampleType: HKObjectType.workoutType(),
+            predicate: predicate,
+            limit: HKObjectQueryNoLimit,
+            sortDescriptors: [sort]
+        ) { _, results, error in
+            if let error { AppLogger.health.error("Workouts query: \(error.localizedDescription)") }
+            let workouts = results as? [HKWorkout] ?? []
+            AppLogger.health.info("Fetched \(workouts.count) workouts from HealthKit")
+            guard !workouts.isEmpty else { completion([]); return }
+
+            // Build details from workout statistics (no per-workout HR query — too slow for bulk import)
+            let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+            let details: [WorkoutDetail] = workouts.map { w in
+                let activityName = Self.workoutActivityName(w.workoutActivityType)
+
+                // Try walking/running distance first, then cycling distance
+                let walkDist = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!)
+                let cycleDist = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceCycling)!)
+                let distMeters = (walkDist?.sumQuantity()?.doubleValue(for: .meter()) ?? 0)
+                    + (cycleDist?.sumQuantity()?.doubleValue(for: .meter()) ?? 0)
+                let calStats = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)
+                let hrStats = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .heartRate)!)
+
+                return WorkoutDetail(
+                    id: w.uuid,
+                    startDate: w.startDate,
+                    endDate: w.endDate,
+                    duration: w.duration,
+                    activityName: activityName,
+                    distanceKm: distMeters / 1000,
+                    calories: calStats?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0,
+                    avgHeartRate: hrStats?.averageQuantity()?.doubleValue(for: bpmUnit) ?? 0,
+                    maxHeartRate: hrStats?.maximumQuantity()?.doubleValue(for: bpmUnit) ?? 0,
+                    sourceName: w.sourceRevision.source.name
+                )
+            }
+
+            completion(details)
+        }
+        store.execute(query)
+    }
+
+    /// Fetch time-series data (HR, cadence, distance) for a single workout.
+    /// Used to enrich workout measurements after bulk import.
+    func fetchWorkoutTimeSeries(
+        from startDate: Date, to endDate: Date,
+        completion: @escaping ([(type: String, samples: [TimestampedValue])]) -> Void
+    ) {
+        let bpmUnit = HKUnit.count().unitDivided(by: .minute())
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let group = DispatchGroup()
+
+        var hrSamples: [TimestampedValue] = []
+        var cadenceSamples: [TimestampedValue] = []
+        var distanceSamples: [TimestampedValue] = []
+
+        // Heart rate — deduplicate by source (prefer source with most samples to avoid iPhone+Watch duplicates)
+        group.enter()
+        fetchSamples(.heartRate, predicate: predicate) { samples in
+            var bySource: [String: [HKQuantitySample]] = [:]
+            for s in samples { bySource[s.sourceRevision.source.name, default: []].append(s) }
+            let bestSource = bySource.max(by: { $0.value.count < $1.value.count })?.value ?? []
+            hrSamples = bestSource.map { TimestampedValue(date: $0.startDate, value: $0.quantity.doubleValue(for: bpmUnit)) }
+            group.leave()
+        }
+
+        // Step cadence (steps per interval → cadence SPM)
+        group.enter()
+        fetchSamples(.stepCount, predicate: predicate) { samples in
+            cadenceSamples = samples.compactMap { s in
+                let dur = s.endDate.timeIntervalSince(s.startDate)
+                guard dur > 0 else { return nil }
+                let steps = s.quantity.doubleValue(for: .count())
+                return TimestampedValue(date: s.startDate.addingTimeInterval(dur / 2), value: (steps / dur) * 60)
+            }
+            group.leave()
+        }
+
+        // Cumulative distance
+        group.enter()
+        fetchSamples(.distanceWalkingRunning, predicate: predicate) { samples in
+            var cumDist: Double = 0
+            distanceSamples = samples.map { s in
+                cumDist += s.quantity.doubleValue(for: .meter())
+                return TimestampedValue(date: s.endDate, value: cumDist / 1000)  // km
+            }
+            group.leave()
+        }
+
+        group.notify(queue: .global(qos: .userInitiated)) {
+            var result: [(type: String, samples: [TimestampedValue])] = []
+            if !hrSamples.isEmpty { result.append((type: DataType.heartRateSample, samples: hrSamples)) }
+            if !cadenceSamples.isEmpty { result.append((type: DataType.cadence, samples: cadenceSamples)) }
+            if !distanceSamples.isEmpty { result.append((type: DataType.workoutDistance, samples: distanceSamples)) }
+            completion(result)
+        }
+    }
+
+    static func workoutActivityName(_ type: HKWorkoutActivityType) -> String {
+        switch type {
+        case .running: return "Run"
+        case .walking: return "Walk"
+        case .cycling: return "Cycle"
+        case .hiking: return "Hike"
+        case .swimming: return "Swim"
+        case .yoga: return "Yoga"
+        case .functionalStrengthTraining: return "Strength"
+        case .traditionalStrengthTraining: return "Weight Training"
+        case .highIntensityIntervalTraining: return "HIIT"
+        case .coreTraining: return "Core"
+        case .elliptical: return "Elliptical"
+        case .rowing: return "Rowing"
+        case .stairClimbing: return "Stairs"
+        case .crossTraining: return "Cross Training"
+        case .mixedCardio: return "Mixed Cardio"
+        case .pilates: return "Pilates"
+        case .dance: return "Dance"
+        case .cooldown: return "Cooldown"
+        case .mindAndBody: return "Mind & Body"
+        case .flexibility: return "Flexibility"
+        case .kickboxing: return "Kickboxing"
+        case .boxing: return "Boxing"
+        case .jumpRope: return "Jump Rope"
+        case .skatingSports: return "Skating"
+        case .snowSports: return "Snow Sports"
+        case .surfingSports: return "Surfing"
+        case .tennis: return "Tennis"
+        case .tableTennis: return "Table Tennis"
+        case .badminton: return "Badminton"
+        case .soccer: return "Soccer"
+        case .basketball: return "Basketball"
+        case .volleyball: return "Volleyball"
+        case .golf: return "Golf"
+        case .climbing: return "Climbing"
+        case .other: return "Other"
+        default:
+            // Convert the raw value to a readable string for any type we didn't list
+            let raw = String(describing: type)
+            return raw.prefix(1).uppercased() + raw.dropFirst()
+        }
+    }
+
+    // MARK: - Sleep Samples Fetch
+
+    /// Fetch sleep analysis samples with stage info. Calls back on a background queue.
+    func fetchSleepSamples(
+        from startDate: Date, to endDate: Date,
+        completion: @escaping ([(stage: String, value: Double, start: Date, end: Date, sourceName: String)]) -> Void
+    ) {
+        guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
+            completion([]); return
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let query = HKSampleQuery(sampleType: sleepType, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, results, error in
+            if let error { AppLogger.health.error("Sleep samples: \(error.localizedDescription)") }
+            let samples = (results as? [HKCategorySample] ?? []).compactMap { s -> (stage: String, value: Double, start: Date, end: Date, sourceName: String)? in
+                let stage: String
+                let value: Double
+                switch HKCategoryValueSleepAnalysis(rawValue: s.value) {
+                case .inBed:                         stage = "InBed";   value = 0
+                case .asleepUnspecified, .asleep:     stage = "Asleep";  value = 1
+                case .awake:                          stage = "Awake";   value = 2
+                case .asleepCore:                     stage = "Core";    value = 3
+                case .asleepDeep:                     stage = "Deep";    value = 4
+                case .asleepREM:                      stage = "REM";     value = 5
+                default: return nil
+                }
+                return (stage: stage, value: value, start: s.startDate, end: s.endDate,
+                        sourceName: s.sourceRevision.source.name)
+            }
+            completion(samples)
+        }
+        store.execute(query)
+    }
+
+    // MARK: - Generic Metric Fetch
+
+    /// Fetch samples of any HK quantity type. Returns timestamped values with source names.
+    /// Calls back on a background queue — caller is responsible for dispatching to main.
+    func fetchMetricSamples(
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        from startDate: Date,
+        to endDate: Date,
+        completion: @escaping ([(value: Double, timestamp: Date, sourceName: String)]) -> Void
+    ) {
+        guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else {
+            completion([]); return
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let query = HKSampleQuery(sampleType: type, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, results, error in
+            if let error { AppLogger.health.error("fetchMetricSamples \(identifier.rawValue): \(error.localizedDescription)") }
+            let samples = (results as? [HKQuantitySample] ?? []).map {
+                (value: $0.quantity.doubleValue(for: unit),
+                 timestamp: $0.startDate,
+                 sourceName: $0.sourceRevision.source.name)
+            }
+            completion(samples)
+        }
+        store.execute(query)
     }
 
     // MARK: - Debug: dump all data types available for a time range

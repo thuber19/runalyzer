@@ -51,15 +51,20 @@ class AppWiring: ObservableObject {
     // Measurement providers — self-contained pipelines
     private var scaleProvider: ScaleMeasurementProvider?
     private var imuProvider: IMUMeasurementProvider?
-    private(set) var stressProvider: StressMeasurementProvider?
+    private(set) var recoveryProvider: RecoveryMeasurementProvider?
+    private(set) var metricProvider: HealthKitMetricProvider?
 
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, healthKit: HealthKitManager, sessions: SessionStore) {
 
+        // Create MetricIndex (read-only query layer over store)
+        let metricIndex = MetricIndex(store: store)
+
         // Create providers
         scaleProvider = ScaleMeasurementProvider(measurementStore: store)
         imuProvider = IMUMeasurementProvider(measurementStore: store, sessionStore: sessions)
-        stressProvider = StressMeasurementProvider(healthKit: healthKit, measurementStore: store)
+        metricProvider = HealthKitMetricProvider(healthKit: healthKit, store: store, metricIndex: metricIndex)
+        recoveryProvider = RecoveryMeasurementProvider(metricIndex: metricIndex, measurementStore: store)
 
         // Per-descriptor handlers — keyed by DeviceDescriptor.id.
         // To add a new device: add one entry here + create a provider.
@@ -106,8 +111,20 @@ class AppWiring: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // Trigger daily stress backfill (skips already-computed days)
-        stressProvider?.computeMissingScores()
+        // Import metrics from HealthKit first, then compute stress scores
+        refreshMetricsAndRecovery()
+
+        // Re-run when app returns to foreground
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in self?.refreshMetricsAndRecovery() }
+            .store(in: &cancellables)
+    }
+
+    /// Import latest metrics from HealthKit, then compute any missing stress scores.
+    func refreshMetricsAndRecovery() {
+        metricProvider?.importMissingMetrics { [weak self] in
+            self?.recoveryProvider?.computeMissingScores()
+        }
     }
 
     // MARK: - Wiring factories

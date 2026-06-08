@@ -107,37 +107,32 @@ struct AlgorithmsView: View {
                 )
             }
 
-            // Daytime Stress
-            Section("Daytime Stress (from Apple Watch)") {
+            // Recovery Score
+            Section("Recovery Score (from Apple Watch)") {
                 AlgorithmCard(
-                    name: "Daytime Stress Index",
-                    id: "daytime_stress_v1",
-                    inputs: "Daytime HRV (SDNN, 06:00–23:00), Apple Watch resting HR",
-                    output: "Stress index 0–100 (higher = more stressed), plus HRV and RHR sub-components",
+                    name: "Daily Recovery Score",
+                    id: "recovery_v1",
+                    inputs: "Overnight HRV (SDNN, 00:00–06:00), Apple Watch resting HR",
+                    output: "Recovery score 0–100 (higher = better recovered), plus HRV and RHR sub-components",
                     method: """
-                    Each signal is compared against a personal 30-day rolling baseline. \
-                    Scores reflect YOUR deviation from YOUR norm — not population averages.
+                    Uses z-score normalization against a personal 30-day rolling baseline. \
+                    Based on overnight HRV — the most stable and validated measurement window.
 
                     HRV component (60% weight):
-                      deviation = (baseline_SDNN − day_SDNN) / baseline_SDNN
-                      score = clamp((deviation + 0.30) / 0.60 × 100, 0, 100)
-                      Maps: SDNN 30% above baseline → 0, SDNN 30% below baseline → 100
+                      z = (day_SDNN − baseline_mean_SDNN) / baseline_SD_SDNN
+                      score = clamp((z + 2) / 4 × 100, 0, 100)
+                      Maps: z=-2 (poor recovery) → 0, z=0 (normal) → 50, z=+2 (excellent) → 100
 
                     RHR component (40% weight):
-                      deviation = (day_RHR − baseline_RHR) / baseline_RHR
-                      score = clamp((deviation + 0.10) / 0.20 × 100, 0, 100)
-                      Maps: RHR 10% below baseline → 0, RHR 10% above baseline → 100
+                      z = (baseline_mean_RHR − day_RHR) / baseline_SD_RHR
+                      score = clamp((z + 2) / 4 × 100, 0, 100)
 
-                    Data sourced from Apple Watch passive background HRV measurements (every ~2h \
-                    during sedentary rest) and Apple Watch nightly resting HR computation. \
-                    Workouts and sleep are automatically excluded by the time window filter and \
-                    because Apple Watch does not record background HRV during active workouts.
-
-                    Minimum 5 baseline days required for meaningful scoring. \
-                    Confidence reported as a separate data point.
+                    Uses overnight HRV only (00:00–06:00) following WHOOP/Oura/Fitbit best practice. \
+                    Daytime HRV spot-checks are too noisy for reliable scoring. \
+                    ~95% of normal days fall between 25–75. Minimum 30 baseline days.
                     """,
-                    citation: "Zanetti S et al. Assessing Garmin Stress Level Score Against Heart Rate Variability Measurements. Stress and Health. 2025. | Cosoli G et al. Wearable Derived Cardiovascular Responses to Stressors. PMC 2023.",
-                    journal: "MDPI Sensors 2022;22(1):151 | Stress and Health 2025 | PMC10237460"
+                    citation: "Altini M. On HRV and the Apple Watch. 2020. | Salazar-Martínez E et al. IES 2024. | MDPI Sensors: Sleep HRV as predictor. 2023;23(1):332.",
+                    journal: "Appl Psychophysiol Biofeedback 2022 | Terra Research: How HRV Actually Works"
                 )
             }
 

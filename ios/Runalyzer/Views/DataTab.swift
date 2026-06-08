@@ -1,11 +1,13 @@
 import SwiftUI
 
 private enum DataFilter: String, CaseIterable {
-    case all      = "All"
-    case workout  = "Workout"
-    case bodyComp = "Body Comp"
-    case stress   = "Stress"
-    case running  = "Running"
+    case all        = "All"
+    case hkWorkout  = "Workouts"
+    case imuWorkout = "IMU"
+    case bodyComp   = "Body Comp"
+    case metric     = "Metrics"
+    case recovery   = "Recovery"
+    case running    = "Running"
 }
 
 /// Unified view of ALL measurements from all sources
@@ -18,11 +20,13 @@ struct DataTab: View {
     private var filtered: [SensorMeasurement] {
         let sorted = measurementStore.measurements.sorted { $0.date > $1.date }
         switch filter {
-        case .all:      return sorted
-        case .workout:  return sorted.filter { $0.type == .workout }
-        case .bodyComp: return sorted.filter { $0.type == .bodyComp }
-        case .stress:   return sorted.filter { isStress($0) }
-        case .running:  return sorted.filter { isRunning($0) }
+        case .all:        return sorted
+        case .hkWorkout: return sorted.filter { $0.type == .hkWorkout }
+        case .imuWorkout: return sorted.filter { $0.type == .workout }
+        case .bodyComp:  return sorted.filter { $0.type == .bodyComp }
+        case .metric:    return sorted.filter { $0.type == .metric }
+        case .recovery:  return sorted.filter { isRecovery($0) }
+        case .running:   return sorted.filter { isRunning($0) }
         }
     }
 
@@ -116,17 +120,19 @@ struct DataTab: View {
     }
 
     private func iconColor(_ m: SensorMeasurement) -> Color {
-        if isStress(m)  { return Color(hex: 0xf4a261) }
+        if isRecovery(m) { return Color(hex: 0xf4a261) }
         if isRunning(m) { return Color(hex: 0x5dadec) }
         switch m.type {
-        case .workout:  return Color(hex: 0xe94560)
-        case .derived:  return Color(hex: 0x5dadec)
-        case .bodyComp: return .green
+        case .workout:   return Color(hex: 0xe94560)
+        case .hkWorkout: return .pink
+        case .derived:   return Color(hex: 0x5dadec)
+        case .bodyComp:  return .green
+        case .metric:    return .cyan
         }
     }
 
-    private func isStress(_ m: SensorMeasurement) -> Bool {
-        m.type == .derived && m.dataPoints.contains { $0.type == DataType.stressIndex }
+    private func isRecovery(_ m: SensorMeasurement) -> Bool {
+        m.type == .derived && m.dataPoints.contains { $0.type == DataType.recoveryIndex }
     }
 
     private func isRunning(_ m: SensorMeasurement) -> Bool {

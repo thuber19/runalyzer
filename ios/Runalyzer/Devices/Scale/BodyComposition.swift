@@ -6,6 +6,13 @@ struct UserProfile: Codable, Equatable {
     var age: Int
     var sex: Sex
 
+    // HR Zone boundaries (bpm). Nil = auto-calculated from age (220 - age).
+    var hrZone1Max: Int?  // below this = Zone 1
+    var hrZone2Max: Int?  // Zone 1 max .. Zone 2 max = Zone 2
+    var hrZone3Max: Int?
+    var hrZone4Max: Int?
+    // Zone 5 = above Zone 4 max
+
     enum Sex: String, Codable, CaseIterable {
         case male, female
 
@@ -20,6 +27,24 @@ struct UserProfile: Codable, Equatable {
     }
 
     static let `default` = UserProfile(heightCm: 175, age: 30, sex: .male)
+
+    /// Custom max HR override. Nil = auto-calculated (220 - age).
+    var maxHROverride: Int?
+
+    /// Max heart rate — uses custom value if set, otherwise 220 - age.
+    var maxHR: Int { maxHROverride ?? (220 - age) }
+
+    /// HR zone boundaries in bpm (uses custom values if set, otherwise defaults from age)
+    var hrZones: [(name: String, maxBPM: Int, color: String)] {
+        let mhr = maxHR
+        return [
+            ("Zone 1", hrZone1Max ?? Int(Double(mhr) * 0.6), "gray"),
+            ("Zone 2", hrZone2Max ?? Int(Double(mhr) * 0.7), "blue"),
+            ("Zone 3", hrZone3Max ?? Int(Double(mhr) * 0.8), "green"),
+            ("Zone 4", hrZone4Max ?? Int(Double(mhr) * 0.9), "orange"),
+            ("Zone 5", mhr, "red"),
+        ]
+    }
 
     private static let keychainKey = "user_profile"
     private static let legacyDefaultsKey = "runalyzer_user_profile"  // migration only

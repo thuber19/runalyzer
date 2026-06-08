@@ -3,7 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var appWiring: AppWiring
-    @State private var isBackfilling = false
+    @State private var isImporting = false
+    @State private var isComputingRecovery = false
 
     var body: some View {
         NavigationStack {
@@ -26,25 +27,45 @@ struct SettingsView: View {
 
                 // Data
                 Section("Data") {
+                    // Import raw metrics from HealthKit
                     Button(action: {
-                        isBackfilling = true
-                        appWiring.stressProvider?.backfillHistory(days: 90)
-                        // Reset after a delay (backfill is async)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            isBackfilling = false
+                        isImporting = true
+                        appWiring.metricProvider?.backfillMetrics(days: 90) {
+                            isImporting = false
                         }
                     }) {
                         HStack {
-                            Label("Backfill Stress History", systemImage: "clock.arrow.circlepath")
+                            Label("Import HealthKit Data", systemImage: "heart.text.square")
                             Spacer()
-                            if isBackfilling {
+                            if isImporting {
                                 ProgressView()
                             } else {
-                                Text("120 days").foregroundColor(.gray)
+                                Text("90 days").foregroundColor(.gray)
                             }
                         }
                     }
-                    .disabled(isBackfilling)
+                    .disabled(isImporting)
+                    .listRowBackground(Color(hex: 0x16213e))
+
+                    // Compute stress scores from imported metrics
+                    Button(action: {
+                        isComputingRecovery = true
+                        appWiring.recoveryProvider?.backfillHistory(days: 90)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                            isComputingRecovery = false
+                        }
+                    }) {
+                        HStack {
+                            Label("Compute Recovery Scores", systemImage: "heart.circle")
+                            Spacer()
+                            if isComputingRecovery {
+                                ProgressView()
+                            } else {
+                                Text("90 days").foregroundColor(.gray)
+                            }
+                        }
+                    }
+                    .disabled(isComputingRecovery)
                     .listRowBackground(Color(hex: 0x16213e))
                 }
 

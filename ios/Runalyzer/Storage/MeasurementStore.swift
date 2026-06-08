@@ -72,6 +72,16 @@ class MeasurementStore: ObservableObject {
         return saveIndex()
     }
 
+    /// Replace an existing measurement by ID with an updated version (e.g., intraday metric update).
+    /// Must be called on main thread (@Published mutations).
+    @discardableResult
+    func update(_ measurement: SensorMeasurement) -> Bool {
+        assert(Thread.isMainThread, "MeasurementStore.update must be called on main thread")
+        guard let idx = measurements.firstIndex(where: { $0.id == measurement.id }) else { return false }
+        measurements[idx] = measurement
+        return saveIndex()
+    }
+
     // MARK: - Load Raw Data
 
     func loadIMUSamples(for measurement: SensorMeasurement) -> [RecordedSample] {
@@ -129,8 +139,11 @@ class MeasurementStore: ObservableObject {
 
     // MARK: - Persistence
 
+    /// Persist the current in-memory measurements to disk.
+    /// Normally called internally; exposed for batch mutation patterns.
     @discardableResult
-    private func saveIndex() -> Bool {
+    func saveIndex() -> Bool {
+        assert(Thread.isMainThread, "MeasurementStore.saveIndex must be called on main thread")
         do {
             let data = try JSONEncoder().encode(measurements)
             try data.write(to: indexURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])

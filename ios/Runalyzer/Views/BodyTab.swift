@@ -26,6 +26,13 @@ struct BodyTab: View {
             .overlay {
                 if showMeasuring { measurementOverlay }
             }
+            .onAppear {
+                // Restart scanning when Body tab appears — the scale only advertises
+                // when stepped on, which may be after the initial 30s scan window expired
+                if scale == nil {
+                    coordinator.startScanning()
+                }
+            }
             .onChange(of: scale?.scaleState) { _, newState in
                 if newState == .measuring || newState == .stable {
                     withAnimation { showMeasuring = true; measureComplete = false }

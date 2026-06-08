@@ -104,26 +104,30 @@ struct SensorMeasurement: Codable, Identifiable {
             let weight = dataPoints.first(where: { $0.type == "weight" })?.value ?? 0
             let fat = dataPoints.first(where: { $0.type == "body_fat_percent" })?.value ?? 0
             return String(format: "%.1f kg · %.1f%% fat", weight, fat)
+        case .hkWorkout:
+            let name = dataPoints.first(where: { $0.type == DataType.workoutType })?.unit ?? "Workout"
+            let dur = dataPoints.first(where: { $0.type == DataType.workoutDuration })?.value ?? 0
+            let dist = dataPoints.first(where: { $0.type == DataType.workoutDistance })?.value ?? 0
+            let m = Int(dur) / 60, s = Int(dur) % 60
+            var parts = ["\(name) \(m):\(String(format: "%02d", s))"]
+            if dist > 0 { parts.append(String(format: "%.2f km", dist)) }
+            if let hr = dataPoints.first(where: { $0.type == DataType.workoutAvgHR }) {
+                parts.append(String(format: "%.0f bpm", hr.value))
+            }
+            return parts.joined(separator: " · ")
         case .derived:
             // Daytime stress score
             // Stress measurement (with or without score)
-            if let stress = dataPoints.first(where: { $0.type == DataType.stressIndex }) {
-                let level = Int(stress.value.rounded())
+            if let recovery = dataPoints.first(where: { $0.type == DataType.recoveryIndex }) {
+                let level = Int(recovery.value.rounded())
                 let label: String
-                switch stress.value {
-                case ..<30: label = "Low"
-                case ..<60: label = "Moderate"
-                default:    label = "High"
+                switch recovery.value {
+                case 75...: label = "Excellent"
+                case 50...: label = "Good"
+                case 25...: label = "Fair"
+                default:    label = "Poor"
                 }
-                return "Stress \(level) · \(label)"
-            } else if dataPoints.contains(where: { $0.type == DataType.stressSDNNavg || $0.type == DataType.stressRestingHR }) {
-                // Raw values only — collecting baseline data
-                let sdnn = dataPoints.first(where: { $0.type == DataType.stressSDNNavg })
-                let rhr = dataPoints.first(where: { $0.type == DataType.stressRestingHR })
-                var parts: [String] = []
-                if let s = sdnn { parts.append(String(format: "SDNN %.0f ms", s.value)) }
-                if let r = rhr { parts.append(String(format: "RHR %.0f bpm", r.value)) }
-                return parts.joined(separator: " · ") + " · collecting"
+                return "Recovery \(level) · \(label)"
             }
             // Running enrichment
             let dist = dataPoints.first(where: { $0.type == DataType.distance })?.value ?? 0
@@ -137,6 +141,43 @@ struct SensorMeasurement: Codable, Identifiable {
                 return String(format: "%.2f km · %d:%02d /km", dist, pm, ps) + hrStr + econStr
             }
             return dataPoints.first.map { "\($0.type): \($0.value)" } ?? "Derived"
+        case .metric:
+            let hrvPoints = dataPoints.filter { $0.type == DataType.hrvSDNN }
+            if !hrvPoints.isEmpty {
+                let avg = hrvPoints.map(\.value).reduce(0, +) / Double(hrvPoints.count)
+                return String(format: "HRV %.0f ms · %d readings", avg, hrvPoints.count)
+            }
+            let rhrPoints = dataPoints.filter { $0.type == DataType.restingHeartRate }
+            if !rhrPoints.isEmpty {
+                let min = rhrPoints.map(\.value).min() ?? 0
+                return String(format: "Resting HR %.0f bpm · %d readings", min, rhrPoints.count)
+            }
+            if let spo2 = dataPoints.first(where: { $0.type == DataType.bloodOxygen }) {
+                let count = dataPoints.filter { $0.type == DataType.bloodOxygen }.count
+                return String(format: "SpO2 %.0f%% · %d readings", spo2.value * 100, count)
+            }
+            if let temp = dataPoints.first(where: { $0.type == DataType.bodyTemperature }) {
+                return String(format: "Temp %.1f°C", temp.value)
+            }
+            if let vo2 = dataPoints.first(where: { $0.type == DataType.vo2Max }) {
+                return String(format: "VO2max %.1f mL/kg/min", vo2.value)
+            }
+            if let steps = dataPoints.first(where: { $0.type == DataType.steps }) {
+                return String(format: "%.0f steps", steps.value)
+            }
+            let hrPoints = dataPoints.filter { $0.type == DataType.heartRateSample }
+            if !hrPoints.isEmpty {
+                let avg = hrPoints.map(\.value).reduce(0, +) / Double(hrPoints.count)
+                return String(format: "HR avg %.0f bpm · %d samples", avg, hrPoints.count)
+            }
+            let sleepPoints = dataPoints.filter { $0.type == DataType.sleepStage }
+            if !sleepPoints.isEmpty {
+                let totalMin = sleepPoints.reduce(0) { sum, p in
+                    sum + (p.endTimestamp?.timeIntervalSince(p.timestamp) ?? 0) / 60
+                }
+                return String(format: "Sleep %.0fh %02.0fm · %d stages", totalMin / 60, totalMin.truncatingRemainder(dividingBy: 60), sleepPoints.count)
+            }
+            return dataPoints.first.map { "\($0.type): \(String(format: "%.1f", $0.value))" } ?? "Metric"
         }
     }
 
@@ -158,6 +199,8 @@ struct SensorMeasurement: Codable, Identifiable {
         case .workout: return "figure.run"
         case .bodyComp: return "scalemass"
         case .derived: return "function"
+        case .metric: return "waveform.path.ecg"
+        case .hkWorkout: return "heart.circle"
         }
     }
 
@@ -190,9 +233,11 @@ struct SensorMeasurement: Codable, Identifiable {
 }
 
 enum MeasurementType: String, Codable {
-    case workout = "workout"
-    case bodyComp = "body_comp"
-    case derived = "derived"
+    case workout = "workout"        // IMU sensor workout
+    case bodyComp = "body_comp"     // scale measurement
+    case derived = "derived"        // algorithm output (stress, enrichment)
+    case metric = "metric"          // raw imported metrics (HRV, RHR, HR, etc.)
+    case hkWorkout = "hk_workout"   // HealthKit workout (time-bounded event with embedded time-series)
 }
 
 // MARK: - Source string convention helpers
@@ -269,16 +314,29 @@ enum DataType {
     // Derived — general
     static let sleepScore = "sleep_score"
 
-    // Daytime stress (daytime_stress_v1)
-    static let stressIndex        = "stress_index"          // 0–100 composite
-    static let stressHRVComponent = "stress_hrv_component"  // 0–100 from SDNN deviation
-    static let stressRHRComponent = "stress_rhr_component"  // 0–100 from RHR deviation
-    static let stressSDNNavg      = "stress_sdnn_avg"       // mean daytime SDNN (ms)
-    static let stressSDNNmin      = "stress_sdnn_min"       // min daytime SDNN (ms)
-    static let stressSDNNmax      = "stress_sdnn_max"       // max daytime SDNN (ms)
-    static let stressSDNNcount    = "stress_sdnn_count"     // number of HRV readings
-    static let stressRestingHR    = "stress_resting_hr"     // Apple Watch resting HR (bpm)
-    static let stressBaselineSDNN = "stress_baseline_sdnn"  // 30-day rolling avg SDNN (ms)
-    static let stressBaselineRHR  = "stress_baseline_rhr"   // 30-day rolling avg RHR (bpm)
-    static let stressConfidence   = "stress_confidence"     // 0–1 data quality
+    // Raw HealthKit metrics (standalone daily measurements)
+    static let hrvSDNN          = "heart_rate_variability_sdnn"  // individual SDNN reading (ms)
+    static let restingHeartRate = "resting_heart_rate"           // daily resting HR (bpm)
+    static let bloodOxygen      = "blood_oxygen"                 // SpO2 (%)
+    static let bodyTemperature  = "body_temperature"             // °C
+    static let vo2Max           = "vo2_max"                      // mL/kg/min
+    static let steps            = "steps"                        // cumulative daily steps
+    static let sleepStage       = "sleep_stage"                  // sleep stage (encoded as double)
+    static let heartRateSample  = "heart_rate_sample"            // individual HR reading (bpm)
+
+    // HealthKit workout data points
+    static let workoutType      = "workout_type"                 // activity type name (stored as string via unit)
+    static let workoutDuration  = "workout_duration"             // seconds
+    static let workoutDistance  = "workout_distance"             // km
+    static let workoutCalories  = "workout_calories"             // kcal
+    static let workoutAvgHR     = "workout_avg_hr"               // bpm
+    static let workoutMaxHR     = "workout_max_hr"               // bpm
+
+    // Recovery score (recovery_v1) — overnight HRV + RHR, z-score normalized
+    static let recoveryIndex        = "recovery_index"          // 0–100 (higher = better recovered)
+    static let recoveryHRVComponent = "recovery_hrv_component"  // 0–100 from overnight SDNN z-score
+    static let recoveryRHRComponent = "recovery_rhr_component"  // 0–100 from RHR z-score
+    static let recoveryBaselineSDNN = "recovery_baseline_sdnn"  // 30-day avg overnight SDNN (ms)
+    static let recoveryBaselineRHR  = "recovery_baseline_rhr"   // 30-day avg RHR (bpm)
+    static let recoveryConfidence   = "recovery_confidence"     // 0–1 data quality
 }

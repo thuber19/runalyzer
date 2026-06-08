@@ -37,6 +37,29 @@ struct ScaleSettingsView: View {
                 .listRowBackground(Color(hex: 0x16213e))
             }
 
+            Section("Heart Rate Zones") {
+                let defaults = defaultZones
+                hrZoneRow("Zone 1 max", value: $profile.hrZone1Max, defaultValue: defaults[0])
+                hrZoneRow("Zone 2 max", value: $profile.hrZone2Max, defaultValue: defaults[1])
+                hrZoneRow("Zone 3 max", value: $profile.hrZone3Max, defaultValue: defaults[2])
+                hrZoneRow("Zone 4 max", value: $profile.hrZone4Max, defaultValue: defaults[3])
+                HStack {
+                    Text("Max HR")
+                    Spacer()
+                    TextField("\(220 - profile.age)", value: $profile.maxHROverride, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 60)
+                    Text("bpm").foregroundColor(.gray)
+                }
+                .listRowBackground(Color(hex: 0x16213e))
+                if profile.maxHROverride == nil {
+                    Text("Default: 220 − \(profile.age) = \(220 - profile.age) bpm")
+                        .font(.caption2).foregroundColor(.gray)
+                        .listRowBackground(Color(hex: 0x16213e))
+                }
+            }
+
             Section {
                 Button(action: {
                     profile.save()
@@ -53,11 +76,30 @@ struct ScaleSettingsView: View {
                 }
                 .listRowBackground(Color(hex: 0x16213e))
             } footer: {
-                Text("These values are used to calculate body fat, muscle mass, and other metrics from the scale's impedance measurement.")
+                Text("Body measurements are used for body composition. HR zones default to standard percentages of 220 − age and can be customized.")
             }
         }
         .scrollContentBackground(.hidden)
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle("Body Profile")
+    }
+
+    /// Default zone boundaries based on current age
+    private var defaultZones: [Int] {
+        let mhr = Double(profile.maxHR)
+        return [Int(mhr * 0.6), Int(mhr * 0.7), Int(mhr * 0.8), Int(mhr * 0.9)]
+    }
+
+    private func hrZoneRow(_ label: String, value: Binding<Int?>, defaultValue: Int) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("\(defaultValue)", value: value, format: .number)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 60)
+            Text("bpm").foregroundColor(.gray)
+        }
+        .listRowBackground(Color(hex: 0x16213e))
     }
 }
