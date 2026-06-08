@@ -326,7 +326,11 @@ BLEByteCharacteristic battChar("2A19", BLERead | BLENotify);
 
 #define VBAT_PIN    PIN_VBAT
 #define VBAT_ENABLE PIN_VBAT_ENABLE
-#define CHG_PIN     22
+
+bool isCharging() {
+  // nRF52840 USBREGSTATUS bit 0: VBUSDETECT — 1 when USB VBUS is present
+  return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk);
+}
 
 static uint8_t cachedBattPct = 0;
 
@@ -348,14 +352,21 @@ uint8_t voltageToPercent(float voltage) {
 }
 
 uint8_t readBatteryPercent() {
-  digitalWrite(VBAT_ENABLE, HIGH);
-  delay(1);
+  // VBAT_ENABLE controls a P-channel MOSFET: LOW = gate pulled low = MOSFET ON = divider enabled
+  digitalWrite(VBAT_ENABLE, LOW);
+  delay(10);  // let divider stabilize
   // Average 4 readings for stability
   uint32_t sum = 0;
   for (int i = 0; i < 4; i++) sum += analogRead(VBAT_PIN);
-  digitalWrite(VBAT_ENABLE, LOW);
-  float voltage = (sum / 4.0f / 4095.0f) * 3.3f * 2.0f;
-  return voltageToPercent(voltage);
+  digitalWrite(VBAT_ENABLE, HIGH);  // disable divider to save power
+  float voltage = (sum / 4.0f / 4096.0f) * 3.3f * (1510.0f / 510.0f);  // 1MΩ/510kΩ divider
+  uint8_t pct = voltageToPercent(voltage);
+  bool charging = isCharging();
+  LOG("BAT raw="); LOG(sum / 4);
+  LOG(" voltage="); LOG(voltage);
+  LOG("V pct="); LOG(pct);
+  LOG("% CHG="); LOGLN(charging ? "charging" : "not charging");
+  return pct;
 }
 
 // ===================== LED =====================
@@ -413,7 +424,7 @@ void updateStatus() {
   buf[1] = sc; buf[2] = sc >> 8; buf[3] = sc >> 16; buf[4] = sc >> 24;
   buf[5] = (uint8_t)header.sampleRateHz;
   buf[6] = cachedBattPct;
-  bool charging = (digitalRead(CHG_PIN) == LOW && cachedBattPct > 5 && cachedBattPct < 100);
+  bool charging = isCharging();
   buf[7] = (charging ? 0x01 : 0) | (hasTimeSync ? 0x02 : 0);
   buf[8] = maxSamples; buf[9] = maxSamples >> 8;
   buf[10] = maxSamples >> 16; buf[11] = maxSamples >> 24;
@@ -555,9 +566,8 @@ void setup() {
   setLED(false, false, false);
 
   pinMode(VBAT_ENABLE, OUTPUT);
-  digitalWrite(VBAT_ENABLE, LOW);
+  digitalWrite(VBAT_ENABLE, HIGH);  // start with divider disabled (HIGH = PMOS OFF)
   analogReadResolution(12);
-  pinMode(CHG_PIN, INPUT_PULLUP);
 
   if (!imuBegin()) {
     LOGLN("IMU FAIL");
