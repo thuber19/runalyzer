@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 /// Universal detail view for any measurement type.
 /// Structure: type-specific summary → expandable data points → expandable raw JSON.
@@ -99,12 +100,24 @@ struct MeasurementDetailView: View {
     // MARK: - Sleep Summary
 
     private func sleepSummaryView(_ sleepPoints: [DataPoint]) -> some View {
-        let stages = sleepPoints.compactMap { p -> (stage: String, minutes: Double)? in
+        // Prefer Watch staged data (Core/REM/Deep) over generic iPhone data (Asleep/InBed)
+        // If Watch stages exist, only count Watch source data to avoid double-counting
+        let hasStages = sleepPoints.contains { ["Core", "Deep", "REM"].contains($0.unit) }
+        let filtered: [DataPoint]
+        if hasStages {
+            // Use only staged sources (Watch) + Awake from any source
+            let stagedSources = Set(sleepPoints.filter { ["Core", "Deep", "REM"].contains($0.unit) }
+                .map { $0.source })
+            filtered = sleepPoints.filter { stagedSources.contains($0.source) || $0.unit == "Awake" }
+        } else {
+            filtered = sleepPoints
+        }
+
+        let stages = filtered.compactMap { p -> (stage: String, minutes: Double)? in
             guard let end = p.endTimestamp else { return nil }
             return (stage: p.unit, minutes: end.timeIntervalSince(p.timestamp) / 60)
         }
 
-        let totalMin = stages.reduce(0) { $0 + $1.minutes }
         let stageNames = ["Deep", "Core", "REM", "Awake", "InBed", "Asleep"]
         let stageMinutes: [(String, Double)] = stageNames.compactMap { name in
             let mins = stages.filter { $0.stage == name }.reduce(0) { $0 + $1.minutes }
@@ -113,23 +126,24 @@ struct MeasurementDetailView: View {
 
         let sleepMin = stages.filter { ["Deep", "Core", "REM", "Asleep"].contains($0.stage) }
             .reduce(0) { $0 + $1.minutes }
-        let efficiency = totalMin > 0 ? sleepMin / totalMin : 0
+        let deepMin = stages.filter { $0.stage == "Deep" }.reduce(0) { $0 + $1.minutes }
+        let remMin = stages.filter { $0.stage == "REM" }.reduce(0) { $0 + $1.minutes }
 
         return VStack(alignment: .leading, spacing: 8) {
             Text("SLEEP").font(.caption2).foregroundColor(.gray)
 
             HStack(spacing: 20) {
                 VStack {
-                    Text(formatMinutes(totalMin)).font(.title2.bold().monospacedDigit())
-                    Text("Total").font(.caption2).foregroundColor(.gray)
-                }
-                VStack {
                     Text(formatMinutes(sleepMin)).font(.title2.bold().monospacedDigit())
                     Text("Asleep").font(.caption2).foregroundColor(.gray)
                 }
                 VStack {
-                    Text(String(format: "%.0f%%", efficiency * 100)).font(.title2.bold().monospacedDigit())
-                    Text("Efficiency").font(.caption2).foregroundColor(.gray)
+                    Text(formatMinutes(deepMin)).font(.title2.bold().monospacedDigit())
+                    Text("Deep").font(.caption2).foregroundColor(.indigo)
+                }
+                VStack {
+                    Text(formatMinutes(remMin)).font(.title2.bold().monospacedDigit())
+                    Text("REM").font(.caption2).foregroundColor(.cyan)
                 }
             }
 
@@ -211,6 +225,14 @@ struct MeasurementDetailView: View {
             if !hrSamples.isEmpty {
                 Divider().background(Color.gray.opacity(0.3))
                 hrZoneBreakdown(hrSamples)
+
+                // HR over time chart
+                Divider().background(Color.gray.opacity(0.3))
+                workoutHRChart(hrSamples)
+
+                // Interval table (5-min averages)
+                Divider().background(Color.gray.opacity(0.3))
+                workoutIntervalTable(hrSamples, duration: duration)
             }
 
             sourceRow
@@ -285,6 +307,110 @@ struct MeasurementDetailView: View {
             Text("Max HR: \(profile.maxHR) bpm · Settings → Body Profile to customize zones")
                 .font(.system(size: 9)).foregroundColor(.gray)
         }
+    }
+
+    // MARK: - Workout HR Chart
+
+    private func workoutHRChart(_ hrSamples: [DataPoint]) -> some View {
+        let sorted = hrSamples.sorted { $0.timestamp < $1.timestamp }
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("HEART RATE OVER TIME").font(.caption2).foregroundColor(.gray)
+            Chart {
+                ForEach(Array(sorted.enumerated()), id: \.offset) { _, p in
+                    LineMark(x: .value("Time", p.timestamp), y: .value("BPM", p.value))
+                        .foregroundStyle(.red)
+                }
+            }
+            .chartYAxis {
+                AxisMarks(position: .leading) { value in
+                    AxisValueLabel { if let v = value.as(Double.self) {
+                        Text(String(format: "%.0f", v)).font(.caption2).foregroundColor(.gray)
+                    }}
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
+                        .foregroundStyle(Color.gray.opacity(0.3))
+                }
+            }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 5)) { value in
+                    AxisValueLabel { if let d = value.as(Date.self) {
+                        Text(Self.timeFmt.string(from: d)).font(.caption2).foregroundColor(.gray)
+                    }}
+                }
+            }
+            .frame(height: 150)
+        }
+    }
+
+    // MARK: - Workout Interval Table
+
+    private func workoutIntervalTable(_ hrSamples: [DataPoint], duration: Double) -> some View {
+        let sorted = hrSamples.sorted { $0.timestamp < $1.timestamp }
+        guard let firstTime = sorted.first?.timestamp else { return AnyView(EmptyView()) }
+
+        // Choose interval: 1-min for workouts < 20min, 5-min otherwise
+        let intervalSec: Double = duration < 1200 ? 60 : 300
+        let intervalLabel = duration < 1200 ? "1 min" : "5 min"
+
+        struct Interval: Identifiable {
+            let id: Int
+            let startOffset: Double
+            let avg: Double, min: Double, max: Double, count: Int
+        }
+
+        var intervals: [Interval] = []
+        let numIntervals = Int(ceil(duration / intervalSec))
+        for i in 0..<numIntervals {
+            let iStart = firstTime.addingTimeInterval(Double(i) * intervalSec)
+            let iEnd = firstTime.addingTimeInterval(Double(i + 1) * intervalSec)
+            let inRange = sorted.filter { $0.timestamp >= iStart && $0.timestamp < iEnd }
+            let values = inRange.map(\.value)
+            if !values.isEmpty {
+                intervals.append(Interval(
+                    id: i,
+                    startOffset: Double(i) * intervalSec,
+                    avg: values.reduce(0, +) / Double(values.count),
+                    min: values.min() ?? 0,
+                    max: values.max() ?? 0,
+                    count: values.count
+                ))
+            }
+        }
+
+        return AnyView(VStack(alignment: .leading, spacing: 4) {
+            Text("HR INTERVALS (\(intervalLabel))").font(.caption2).foregroundColor(.gray)
+
+            // Header
+            HStack {
+                Text("Time").font(.caption2.bold()).frame(width: 50, alignment: .leading)
+                Text("Avg").font(.caption2.bold()).frame(width: 40)
+                Text("Min").font(.caption2.bold()).frame(width: 40)
+                Text("Max").font(.caption2.bold()).frame(width: 40)
+                Spacer()
+            }
+            .foregroundColor(.gray)
+            .padding(.top, 4)
+
+            ForEach(intervals) { iv in
+                HStack {
+                    Text(formatOffset(iv.startOffset))
+                        .font(.caption.monospacedDigit()).foregroundColor(.gray)
+                        .frame(width: 50, alignment: .leading)
+                    Text(String(format: "%.0f", iv.avg))
+                        .font(.caption.monospacedDigit()).frame(width: 40)
+                    Text(String(format: "%.0f", iv.min))
+                        .font(.caption.monospacedDigit()).foregroundColor(.gray).frame(width: 40)
+                    Text(String(format: "%.0f", iv.max))
+                        .font(.caption.monospacedDigit()).foregroundColor(.gray).frame(width: 40)
+                    Spacer()
+                }
+            }
+        })
+    }
+
+    private func formatOffset(_ seconds: Double) -> String {
+        let m = Int(seconds) / 60, s = Int(seconds) % 60
+        return String(format: "%d:%02d", m, s)
     }
 
     // MARK: - IMU Workout Summary

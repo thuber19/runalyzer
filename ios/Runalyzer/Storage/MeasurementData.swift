@@ -162,8 +162,11 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
             if let vo2 = dataPoints.first(where: { $0.type == DataType.vo2Max }) {
                 return String(format: "VO2max %.1f mL/kg/min", vo2.value)
             }
-            if let steps = dataPoints.first(where: { $0.type == DataType.steps }) {
-                return String(format: "%.0f steps", steps.value)
+            let stepPoints = dataPoints.filter { $0.type == DataType.steps }
+            if let maxSteps = stepPoints.max(by: { $0.value < $1.value }) {
+                let sourceCount = Set(stepPoints.map(\.source)).count
+                let suffix = sourceCount > 1 ? " · \(sourceCount) sources" : ""
+                return String(format: "%.0f steps%@", maxSteps.value, suffix)
             }
             let hrPoints = dataPoints.filter { $0.type == DataType.heartRateSample }
             if !hrPoints.isEmpty {

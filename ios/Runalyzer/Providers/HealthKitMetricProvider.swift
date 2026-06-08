@@ -93,15 +93,21 @@ class HealthKitMetricProvider {
             DispatchQueue.main.async {
                 for (day, daySamples) in byDay {
                     if isCumulative {
-                        // Steps: sum per day, single DataPoint
-                        let total = daySamples.map(\.value).reduce(0, +)
-                        let sourceName = daySamples.first?.sourceName ?? "Apple Watch"
-                        self.upsertMetric(day: day, dataType: dataType, dataPoints: [
-                            DataPoint(timestamp: day, endTimestamp: nil,
-                                      type: dataType, value: total,
-                                      unit: unit.unitString, source: DataSource.healthKitSource(sourceName),
-                                      role: .primary)
-                        ], samples: daySamples, store: store, replaceFull: true)
+                        // Steps: sum per SOURCE per day (not across sources — would double-count)
+                        // Apple Health deduplicates by taking max of overlapping periods
+                        var bySource: [String: Double] = [:]
+                        for s in daySamples { bySource[s.sourceName, default: 0] += s.value }
+
+                        // Store one DataPoint per source
+                        var dps: [DataPoint] = []
+                        for (source, total) in bySource.sorted(by: { $0.value > $1.value }) {
+                            dps.append(DataPoint(timestamp: day, endTimestamp: nil,
+                                                 type: dataType, value: total,
+                                                 unit: unit.unitString, source: DataSource.healthKitSource(source),
+                                                 role: .primary))
+                        }
+                        self.upsertMetric(day: day, dataType: dataType, dataPoints: dps,
+                                          samples: daySamples, store: store, replaceFull: true)
                     } else {
                         // All other metrics: one DataPoint per reading
                         let dps = daySamples.map { s in
@@ -170,22 +176,24 @@ class HealthKitMetricProvider {
         healthKit.fetchSleepSamples(from: rangeStart, to: Date()) { [weak self] samples in
             guard let self, let store = self.store else { completion(); return }
 
-            // Deduplicate: prefer Apple Watch source. Multiple apps/devices write overlapping
-            // sleep data — we pick one source per night to avoid double-counting.
-            let preferWatch = samples.filter { $0.sourceName.lowercased().contains("watch") }
-            let dedupedSamples = preferWatch.isEmpty ? samples : preferWatch
-
-            // Group by night (assign to the day of endDate = wake-up day)
+            // Assign sleep to "sleep night" — stages starting after 6pm belong to the next day.
+            // This matches how Apple Health groups a night's sleep (e.g., 10pm Jun 7 → 7am Jun 8 = Jun 8's sleep).
             var byDay: [Date: [(stage: String, value: Double, start: Date, end: Date, sourceName: String)]] = [:]
-            for s in dedupedSamples {
-                let day = cal.startOfDay(for: s.end)
-                byDay[day, default: []].append(s)
+            for s in samples {
+                let startHour = cal.component(.hour, from: s.start)
+                let assignDate: Date
+                if startHour >= 18 {
+                    // Evening: belongs to next day's sleep
+                    assignDate = cal.startOfDay(for: cal.date(byAdding: .day, value: 1, to: s.start) ?? s.end)
+                } else {
+                    // Morning/afternoon: belongs to today
+                    assignDate = cal.startOfDay(for: s.start)
+                }
+                byDay[assignDate, default: []].append(s)
             }
 
             DispatchQueue.main.async {
                 for (day, stages) in byDay {
-                    guard self.metricIndex.metricMeasurement(forDay: day, containingType: DataType.sleepStage) == nil else { continue }
-
                     let dps = stages.map { s in
                         DataPoint(timestamp: s.start, endTimestamp: s.end,
                                   type: DataType.sleepStage, value: s.value,
@@ -196,11 +204,19 @@ class HealthKitMetricProvider {
 
                     let sourceNames = Set(stages.map(\.sourceName))
                     let sources = sourceNames.map { MeasurementSource.healthKitDevice(name: $0) }
-                    let measurement = SensorMeasurement(
-                        id: UUID(), date: day, type: .metric,
-                        sources: sources, dataPoints: dps, rawDataFiles: []
-                    )
-                    store.save(measurement)
+
+                    if var existing = self.metricIndex.metricMeasurement(forDay: day, containingType: DataType.sleepStage) {
+                        // Update: replace all sleep DataPoints with fresh data from HealthKit
+                        existing.dataPoints.removeAll { $0.type == DataType.sleepStage }
+                        existing.dataPoints.append(contentsOf: dps)
+                        store.update(existing)
+                    } else {
+                        let measurement = SensorMeasurement(
+                            id: UUID(), date: day, type: .metric,
+                            sources: sources, dataPoints: dps, rawDataFiles: []
+                        )
+                        store.save(measurement)
+                    }
                 }
                 completion()
             }

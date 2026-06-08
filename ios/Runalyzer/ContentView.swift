@@ -3,6 +3,11 @@ import SwiftUI
 struct ContentView: View {
     var body: some View {
         TabView {
+            HomeTab()
+                .tabItem {
+                    Label("Home", systemImage: "house")
+                }
+
             RunalyzerTab()
                 .tabItem {
                     Label("Runalyzer", systemImage: "waveform.path.ecg")
