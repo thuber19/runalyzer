@@ -38,11 +38,15 @@ class RunMetrics: ObservableObject {
         let accelMag = p.accelMagnitude
         let gyroMag = p.gyroMagnitude
 
-        // H3: Use suffix instead of removeFirst (O(1) vs O(n))
+        // Append and trim (batched to avoid per-packet allocation)
         accelHistory.append(accelMag)
         gyroHistory.append(gyroMag)
-        if accelHistory.count > historySize * 2 { accelHistory = Array(accelHistory.suffix(historySize)) }
-        if gyroHistory.count > historySize * 2 { gyroHistory = Array(gyroHistory.suffix(historySize)) }
+        if accelHistory.count > historySize + 100 {
+            accelHistory.removeFirst(accelHistory.count - historySize)
+        }
+        if gyroHistory.count > historySize + 100 {
+            gyroHistory.removeFirst(gyroHistory.count - historySize)
+        }
 
         // Peak impact — decays to baseline over ~3 seconds (0.99^100 ≈ 0.37)
         if accelMag > peakImpact { peakImpact = accelMag }

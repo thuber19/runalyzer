@@ -141,9 +141,9 @@ class HealthKitMetricProvider {
                 existing.dataPoints.append(contentsOf: dataPoints)
                 store.update(existing)
             } else {
-                // Merge: dedup by timestamp
-                let existingTimestamps = Set(existing.dataPoints.map { $0.timestamp.timeIntervalSince1970 })
-                let newPoints = dataPoints.filter { !existingTimestamps.contains($0.timestamp.timeIntervalSince1970) }
+                // Merge: dedup by timestamp (millisecond precision to avoid floating-point mismatches)
+                let existingTimestamps = Set(existing.dataPoints.map { Int($0.timestamp.timeIntervalSince1970 * 1000) })
+                let newPoints = dataPoints.filter { !existingTimestamps.contains(Int($0.timestamp.timeIntervalSince1970 * 1000)) }
                 guard !newPoints.isEmpty else { return }
                 existing.dataPoints.append(contentsOf: newPoints)
                 existing.dataPoints.sort { $0.timestamp < $1.timestamp }

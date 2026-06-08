@@ -41,9 +41,11 @@ struct HealthView: View {
                 healthKit.fetchTodaySummary { s in summary = s }
                 healthKit.fetchLastNightSleep()
             }
+            #if DEBUG
             .sheet(isPresented: $showDebug) {
                 debugSheet
             }
+            #endif
         }
     }
 
@@ -263,6 +265,7 @@ struct HealthView: View {
     }
 
     // MARK: - Debug
+    #if DEBUG
     private var debugSection: some View {
         VStack(spacing: 12) {
             HStack {
@@ -301,7 +304,9 @@ struct HealthView: View {
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
     }
+    #endif
 
+    #if DEBUG
     private var debugSheet: some View {
         NavigationStack {
             ScrollView {
@@ -324,4 +329,5 @@ struct HealthView: View {
             }
         }
     }
+    #endif
 }

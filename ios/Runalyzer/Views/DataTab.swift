@@ -16,6 +16,8 @@ struct DataTab: View {
     @State private var filter: DataFilter = .all
     @State private var selection = Set<UUID>()
     @State private var editMode: EditMode = .inactive
+    @State private var showDeleteConfirmation = false
+    @State private var pendingDeleteIDs = Set<UUID>()
 
     private var filtered: [SensorMeasurement] {
         let sorted = measurementStore.measurements.sorted { $0.date > $1.date }
@@ -68,8 +70,8 @@ struct DataTab: View {
                         .listRowBackground(Color(hex: 0x16213e))
                     }
                     .onDelete { indexSet in
-                        let ids = Set(indexSet.map { filtered[$0].id })
-                        measurementStore.deleteBatch(ids)
+                        pendingDeleteIDs = Set(indexSet.map { filtered[$0].id })
+                        showDeleteConfirmation = true
                     }
                 }
             }
@@ -91,15 +93,28 @@ struct DataTab: View {
                         }
                         if !selection.isEmpty {
                             Button("Delete \(selection.count)", role: .destructive) {
-                                measurementStore.deleteBatch(selection)
-                                selection.removeAll()
-                                editMode = .inactive
+                                pendingDeleteIDs = selection
+                                showDeleteConfirmation = true
                             }
                         }
                     }
                 }
             }
             .environment(\.editMode, $editMode)
+            .alert("Delete \(pendingDeleteIDs.count) measurement\(pendingDeleteIDs.count == 1 ? "" : "s")?",
+                   isPresented: $showDeleteConfirmation) {
+                Button("Delete", role: .destructive) {
+                    measurementStore.deleteBatch(pendingDeleteIDs)
+                    selection.removeAll()
+                    pendingDeleteIDs.removeAll()
+                    editMode = .inactive
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingDeleteIDs.removeAll()
+                }
+            } message: {
+                Text("This cannot be undone.")
+            }
         }
     }
 

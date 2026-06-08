@@ -8,8 +8,9 @@ class MeasurementStore: ObservableObject {
     @Published var corruptDataDetected = false
 
     private var storageDir: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Runalyzer/Data", isDirectory: true)
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("Runalyzer/Data", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

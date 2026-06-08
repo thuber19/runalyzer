@@ -68,6 +68,8 @@ class ScaleMeasurementProvider {
             sources: sources,
             dataPoints: dp, rawDataFiles: []
         )
-        measurementStore?.save(measurement)
+        if measurementStore?.save(measurement) != true {
+            print("ScaleMeasurementProvider: failed to save body comp measurement")
+        }
     }
 }

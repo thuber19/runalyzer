@@ -30,6 +30,8 @@ class EnrichmentProvider {
             imuMeasurementID: imuID
         )
         let derived = SessionEnrichment.compute(input)
-        store.save(derived)
+        if !store.save(derived) {
+            print("EnrichmentProvider: failed to save enriched measurement")
+        }
     }
 }

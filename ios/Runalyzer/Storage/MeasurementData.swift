@@ -4,14 +4,14 @@ import Foundation
 
 /// Controls UI display: primary values are headline metrics shown prominently,
 /// detail values are supporting info shown in expanded/collapsible sections.
-enum DataPointRole: String, Codable {
+enum DataPointRole: String, Codable, Sendable {
     case primary   // headline values (weight, stress_index, pace)
     case detail    // supporting values (impedance, confidence, SDNN min/max)
 }
 
 // MARK: - Data Point (universal unit of measurement)
 
-struct DataPoint: Codable, Identifiable {
+struct DataPoint: Codable, Identifiable, Sendable {
     var id: String { "\(type)-\(source)-\(timestamp.timeIntervalSince1970)" }
 
     let timestamp: Date
@@ -48,7 +48,7 @@ struct DataPoint: Codable, Identifiable {
 
 // MARK: - Measurement Source (device or algorithm that produced data)
 
-struct MeasurementSource: Codable, Identifiable {
+struct MeasurementSource: Codable, Identifiable, Sendable {
     var id: String { serialNumber ?? deviceName }
 
     let deviceType: String      // "imu_sensor", "qn_scale", "apple_watch", "algorithm"
@@ -71,7 +71,7 @@ struct MeasurementSource: Codable, Identifiable {
 
 // MARK: - Measurement (one recording, one weigh-in, one derived score)
 
-struct SensorMeasurement: Codable, Identifiable {
+struct SensorMeasurement: Codable, Identifiable, Sendable {
     static let currentVersion = 1
 
     let id: UUID
@@ -181,14 +181,7 @@ struct SensorMeasurement: Codable, Identifiable {
         }
     }
 
-    private static let fmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
-
-    var dateString: String { Self.fmt.string(from: date) }
+    var dateString: String { DateFormatters.mediumDateTime.string(from: date) }
 
     var sourceLabel: String {
         sources.map(\.deviceName).joined(separator: " + ")
@@ -232,7 +225,7 @@ struct SensorMeasurement: Codable, Identifiable {
     }
 }
 
-enum MeasurementType: String, Codable {
+enum MeasurementType: String, Codable, Sendable {
     case workout = "workout"        // IMU sensor workout
     case bodyComp = "body_comp"     // scale measurement
     case derived = "derived"        // algorithm output (stress, enrichment)

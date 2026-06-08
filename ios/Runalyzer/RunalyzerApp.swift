@@ -57,6 +57,11 @@ class AppWiring: ObservableObject {
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, healthKit: HealthKitManager, sessions: SessionStore) {
 
+        // Clear previous subscriptions (prevents duplicates if setup called multiple times)
+        cancellables.removeAll()
+        wiredDriverIDs.removeAll()
+        driverCancellables.removeAll()
+
         // Create MetricIndex (read-only query layer over store)
         let metricIndex = MetricIndex(store: store)
 

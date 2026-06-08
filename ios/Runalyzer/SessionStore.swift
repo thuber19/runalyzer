@@ -48,14 +48,7 @@ struct RunSession: Identifiable, Codable {
         // Future migration hooks go here: if modelVersion < X { ... }
     }
 
-    private static let fmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
-
-    var dateString: String { Self.fmt.string(from: date) }
+    var dateString: String { DateFormatters.mediumDateTime.string(from: date) }
 
     var durationString: String {
         let m = Int(duration) / 60
@@ -69,8 +62,9 @@ class SessionStore: ObservableObject {
     @Published var corruptDataDetected = false
 
     private var storageDir: URL {
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Runalyzer", isDirectory: true)
+        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let dir = base.appendingPathComponent("Runalyzer", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

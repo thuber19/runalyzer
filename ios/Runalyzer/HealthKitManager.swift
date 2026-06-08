@@ -17,14 +17,7 @@ struct AppleWorkout: Identifiable {
         return String(format: "%d:%02d", m, s)
     }
 
-    private static let fmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f
-    }()
-
-    var dateString: String { Self.fmt.string(from: startDate) }
+    var dateString: String { DateFormatters.mediumDateTime.string(from: startDate) }
 
     var activityName: String {
         switch activityType {
@@ -128,18 +121,16 @@ class HealthKitManager: ObservableObject {
     // strideLength, verticalOscillation, groundContactTime) prompts unnecessary permissions.
     private let readTypes: Set<HKObjectType> = {
         var types = Set<HKObjectType>()
-        types.insert(HKQuantityType.quantityType(forIdentifier: .heartRate)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .stepCount)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .distanceCycling)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .oxygenSaturation)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .bodyTemperature)!)
-        types.insert(HKQuantityType.quantityType(forIdentifier: .vo2Max)!)
+        let quantityIDs: [HKQuantityTypeIdentifier] = [
+            .heartRate, .stepCount, .distanceWalkingRunning, .distanceCycling,
+            .activeEnergyBurned, .heartRateVariabilitySDNN, .restingHeartRate,
+            .oxygenSaturation, .bodyTemperature, .vo2Max
+        ]
+        for id in quantityIDs {
+            if let t = HKQuantityType.quantityType(forIdentifier: id) { types.insert(t) }
+        }
         types.insert(HKObjectType.workoutType())
-        types.insert(HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!)
+        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { types.insert(sleep) }
         return types
     }()
 
@@ -477,11 +468,9 @@ class HealthKitManager: ObservableObject {
         } else { group.leave() }
 
         group.notify(queue: .global(qos: .userInitiated)) {
-            // Group SDNN by day — daytime only (06:00–23:00), preserving source name
+            // Group SDNN by day — ALL readings (algorithms filter as needed)
             var sdnnByDay: [Date: [(value: Double, sourceName: String)]] = [:]
             for s in allSDNN {
-                let hour = cal.component(.hour, from: s.date)
-                guard hour >= 6 && hour < 23 else { continue }
                 let day = cal.startOfDay(for: s.date)
                 sdnnByDay[day, default: []].append((value: s.value, sourceName: s.sourceName))
             }
@@ -803,6 +792,7 @@ class HealthKitManager: ObservableObject {
     }
 
     // MARK: - Debug: dump all data types available for a time range
+    #if DEBUG
     func debugDump(from startDate: Date, to endDate: Date, completion: @escaping (String) -> Void) {
         let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
         let serialQueue = DispatchQueue(label: "healthkit.debug")
@@ -915,4 +905,5 @@ class HealthKitManager: ObservableObject {
             completion(outputParts.joined())
         }
     }
+    #endif
 }
