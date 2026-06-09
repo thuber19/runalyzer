@@ -301,12 +301,16 @@ struct DataTab: View {
 
     // MARK: - Helpers
 
+    private static let dayLabelFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "E, d MMM yyyy"
+        return f
+    }()
+
     private func dayLabel(_ date: Date) -> String {
         if cal.isDateInToday(date) { return "Today" }
         if cal.isDateInYesterday(date) { return "Yesterday" }
-        let f = DateFormatter()
-        f.dateFormat = "E, d MMM yyyy"
-        return f.string(from: date)
+        return Self.dayLabelFormatter.string(from: date)
     }
 
     private func formatMetricSummary(type: String, count: Int, avg: Double,

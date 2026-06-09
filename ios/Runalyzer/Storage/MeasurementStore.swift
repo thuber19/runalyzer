@@ -6,43 +6,54 @@ import os
 /// Central storage for measurements (metrics, body comp, derived scores).
 /// Backed by GRDB/SQLite. Workouts are stored separately in WorkoutStore.
 ///
-/// The `measurements` array holds lightweight headers (no DataPoints) for
-/// list views. DataPoints are fetched from SQLite on demand.
+/// The `measurements` array auto-updates via GRDB ValueObservation when the
+/// database changes. Headers are lightweight (no DataPoints loaded).
 class MeasurementStore: ObservableObject {
     @Published var measurements: [SensorMeasurement] = []
 
     private let db: AppDatabase
+    private var observationCancellable: AnyDatabaseCancellable?
 
     private var storageDir: URL { AppDatabase.storageDir }
 
     init(db: AppDatabase? = nil) {
         self.db = db ?? AppDatabase.shared
-        loadMeasurements()
+        startObservation()
     }
 
-    // MARK: - Load (lightweight headers only)
+    // MARK: - Reactive Observation
 
-    private func loadMeasurements() {
-        do {
-            let records: [MeasurementRecord] = try db.dbQueue.read { db in
-                try MeasurementRecord
-                    .order(Column("date").desc)
-                    .fetchAll(db)
+    /// Observes the measurement table and auto-updates the published array.
+    private func startObservation() {
+        let observation = ValueObservation.tracking { db -> [SensorMeasurement] in
+            let records = try MeasurementRecord
+                .order(Column("date").desc)
+                .fetchAll(db)
+
+            // Batch-load all sources in a single query to avoid N+1
+            let allSources = try MeasurementSourceRecord.fetchAll(db)
+            var sourcesByMeasurement: [String: [MeasurementSource]] = [:]
+            for src in allSources {
+                sourcesByMeasurement[src.measurementId, default: []].append(src.toModel())
             }
-            // Load headers with sources but WITHOUT DataPoints (memory win)
-            measurements = try db.dbQueue.read { db in
-                try records.map { record in
-                    let sources = try MeasurementSourceRecord
-                        .filter(Column("measurementId") == record.id)
-                        .fetchAll(db)
-                        .map { $0.toModel() }
-                    return record.toModel(sources: sources)
+
+            return records.map { record in
+                record.toModel(sources: sourcesByMeasurement[record.id] ?? [])
+            }
+        }
+
+        observationCancellable = observation.start(
+            in: db.dbQueue,
+            scheduling: .immediate,
+            onError: { error in
+                AppLogger.storage.error("Observation error: \(error.localizedDescription)")
+            },
+            onChange: { [weak self] measurements in
+                DispatchQueue.main.async {
+                    self?.measurements = measurements
                 }
             }
-        } catch {
-            AppLogger.storage.error("Failed to load measurements: \(error.localizedDescription)")
-            measurements = []
-        }
+        )
     }
 
     // MARK: - Query
@@ -56,7 +67,6 @@ class MeasurementStore: ObservableObject {
     }
 
     /// Fetch all DataPoints of a given type across all measurements via SQL.
-    /// Replaces the old in-memory `_dpIndex`.
     func dataPoints(ofType type: String) -> [DataPoint] {
         do {
             return try db.dbQueue.read { db in
@@ -83,6 +93,7 @@ class MeasurementStore: ObservableObject {
                     .map { $0.toModel() }
             }
         } catch {
+            AppLogger.storage.error("dataPoints(for:) query failed: \(error.localizedDescription)")
             return []
         }
     }
@@ -104,22 +115,22 @@ class MeasurementStore: ObservableObject {
 
     @discardableResult
     func save(_ measurement: SensorMeasurement, rawData: [(filename: String, data: Data)] = []) -> Bool {
-        assert(Thread.isMainThread, "MeasurementStore.save must be called on main thread")
-        if measurements.contains(where: { $0.id == measurement.id }) { return true }
-
         // Write raw data files to disk
         for raw in rawData {
             do {
                 try raw.data.write(to: storageDir.appendingPathComponent(raw.filename),
                                    options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             } catch {
-                print("Failed to write raw data \(raw.filename): \(error)")
+                AppLogger.storage.error("Failed to write raw data \(raw.filename): \(error.localizedDescription)")
                 return false
             }
         }
 
         do {
             try db.dbQueue.write { db in
+                // Skip if already exists
+                if try MeasurementRecord.fetchOne(db, key: measurement.id.uuidString) != nil { return }
+
                 let record = MeasurementRecord(from: measurement)
                 try record.insert(db)
 
@@ -133,34 +144,21 @@ class MeasurementStore: ObservableObject {
                     try dpRecord.insert(db)
                 }
             }
-
-            // Add lightweight header to in-memory array (no DataPoints)
-            let header = SensorMeasurement(
-                id: measurement.id, date: measurement.date, type: measurement.type,
-                sources: measurement.sources, dataPoints: [],
-                rawDataFiles: measurement.rawDataFiles,
-                linkedMeasurements: measurement.linkedMeasurements,
-                inputMeasurements: measurement.inputMeasurements
-            )
-            measurements.insert(header, at: 0)
+            // No manual array update — ValueObservation handles it
             return true
         } catch {
-            print("Failed to save measurement to DB: \(error)")
+            AppLogger.storage.error("Failed to save measurement to DB: \(error.localizedDescription)")
             return false
         }
     }
 
     @discardableResult
     func saveBatch(_ newMeasurements: [SensorMeasurement]) -> Bool {
-        assert(Thread.isMainThread, "MeasurementStore.saveBatch must be called on main thread")
-        let toInsert = newMeasurements.filter { m in
-            !measurements.contains(where: { $0.id == m.id })
-        }
-        guard !toInsert.isEmpty else { return true }
-
         do {
             try db.dbQueue.write { db in
-                for measurement in toInsert {
+                for measurement in newMeasurements {
+                    if try MeasurementRecord.fetchOne(db, key: measurement.id.uuidString) != nil { continue }
+
                     let record = MeasurementRecord(from: measurement)
                     try record.insert(db)
 
@@ -175,34 +173,20 @@ class MeasurementStore: ObservableObject {
                     }
                 }
             }
-
-            for measurement in toInsert {
-                let header = SensorMeasurement(
-                    id: measurement.id, date: measurement.date, type: measurement.type,
-                    sources: measurement.sources, dataPoints: [],
-                    rawDataFiles: measurement.rawDataFiles,
-                    inputMeasurements: measurement.inputMeasurements
-                )
-                measurements.insert(header, at: 0)
-            }
             return true
         } catch {
-            print("Failed to save batch to DB: \(error)")
+            AppLogger.storage.error("Failed to save batch to DB: \(error.localizedDescription)")
             return false
         }
     }
 
     @discardableResult
     func update(_ measurement: SensorMeasurement) -> Bool {
-        assert(Thread.isMainThread, "MeasurementStore.update must be called on main thread")
-        guard let idx = measurements.firstIndex(where: { $0.id == measurement.id }) else { return false }
-
         do {
             try db.dbQueue.write { db in
                 let record = MeasurementRecord(from: measurement)
                 try record.update(db)
 
-                // Replace all sources
                 try db.execute(sql: "DELETE FROM measurement_source WHERE measurementId = ?",
                                arguments: [record.id])
                 for source in measurement.sources {
@@ -210,7 +194,6 @@ class MeasurementStore: ObservableObject {
                     try srcRecord.insert(db)
                 }
 
-                // Replace all DataPoints
                 try db.execute(sql: "DELETE FROM data_point WHERE measurementId = ?",
                                arguments: [record.id])
                 for dp in measurement.dataPoints {
@@ -218,17 +201,9 @@ class MeasurementStore: ObservableObject {
                     try dpRecord.insert(db)
                 }
             }
-
-            // Update in-memory header (without DataPoints)
-            measurements[idx] = SensorMeasurement(
-                id: measurement.id, date: measurement.date, type: measurement.type,
-                sources: measurement.sources, dataPoints: [],
-                rawDataFiles: measurement.rawDataFiles,
-                inputMeasurements: measurement.inputMeasurements
-            )
             return true
         } catch {
-            print("Failed to update measurement in DB: \(error)")
+            AppLogger.storage.error("Failed to update measurement in DB: \(error.localizedDescription)")
             return false
         }
     }
@@ -246,12 +221,12 @@ class MeasurementStore: ObservableObject {
             }
             return true
         } catch {
-            print("Failed to append DataPoints: \(error)")
+            AppLogger.storage.error("Failed to append DataPoints: \(error.localizedDescription)")
             return false
         }
     }
 
-    /// Persist index — now a no-op (DB writes are immediate). Kept for API compatibility.
+    /// No-op — DB writes are immediate. Kept for API compatibility.
     @discardableResult
     func saveIndex() -> Bool { true }
 
@@ -265,7 +240,6 @@ class MeasurementStore: ObservableObject {
         return samples
     }
 
-    /// Load IMU samples by workout (for the new Workout entity).
     func loadIMUSamples(for workout: Workout) -> [RecordedSample] {
         guard let fileName = workout.rawDataFiles.first(where: { $0.hasPrefix("imu_") }) else { return [] }
         let url = storageDir.appendingPathComponent(fileName)
@@ -278,10 +252,7 @@ class MeasurementStore: ObservableObject {
 
     @discardableResult
     func delete(_ id: UUID) -> Bool {
-        assert(Thread.isMainThread, "MeasurementStore.delete must be called on main thread")
-        guard let idx = measurements.firstIndex(where: { $0.id == id }) else { return false }
-        let m = measurements[idx]
-
+        guard let m = measurement(byID: id) else { return false }
         do {
             try db.dbQueue.write { db in
                 try db.execute(sql: "DELETE FROM measurement WHERE id = ?", arguments: [id.uuidString])
@@ -289,43 +260,61 @@ class MeasurementStore: ObservableObject {
             for file in m.rawDataFiles {
                 try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(file))
             }
-            measurements.remove(at: idx)
             return true
         } catch {
-            print("Failed to delete measurement: \(error)")
+            AppLogger.storage.error("Failed to delete measurement: \(error.localizedDescription)")
             return false
         }
     }
 
     @discardableResult
     func deleteBatch(_ ids: Set<UUID>) -> Bool {
-        assert(Thread.isMainThread, "MeasurementStore.deleteBatch must be called on main thread")
-
         do {
+            // Collect raw files before delete
+            let files = ids.compactMap { id in measurement(byID: id) }.flatMap(\.rawDataFiles)
+
             try db.dbQueue.write { db in
                 for id in ids {
                     try db.execute(sql: "DELETE FROM measurement WHERE id = ?", arguments: [id.uuidString])
                 }
             }
-            for id in ids {
-                if let idx = measurements.firstIndex(where: { $0.id == id }) {
-                    let m = measurements[idx]
-                    for file in m.rawDataFiles {
-                        try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(file))
-                    }
-                    measurements.remove(at: idx)
-                }
+            for file in files {
+                try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(file))
             }
             return true
         } catch {
-            print("Failed to delete batch: \(error)")
+            AppLogger.storage.error("Failed to delete batch: \(error.localizedDescription)")
             return false
         }
     }
 
-    // MARK: - SQL Helpers (used by MetricIndex and other query layers)
+    // MARK: - SQL Helpers
 
-    /// Execute a read query and return DataPoints. For use by MetricIndex.
+    /// Returns measurement IDs that contain at least one DataPoint of the given type in the date range.
+    /// Single JOIN query — avoids N+1 per-measurement lookups.
+    func measurementIDs(containingType type: String, from startDate: Date, to endDate: Date,
+                        measurementType: MeasurementType? = nil) -> Set<String> {
+        do {
+            return try db.dbQueue.read { db in
+                var sql = """
+                    SELECT DISTINCT dp.measurementId FROM data_point dp
+                    JOIN measurement m ON dp.measurementId = m.id
+                    WHERE dp.type = ? AND m.date >= ? AND m.date <= ?
+                    """
+                var args: [DatabaseValueConvertible] = [type, startDate.timeIntervalSince1970, endDate.timeIntervalSince1970]
+                if let mt = measurementType {
+                    sql += " AND m.type = ?"
+                    args.append(mt.rawValue)
+                }
+                let ids = try String.fetchAll(db, sql: sql, arguments: StatementArguments(args))
+                return Set(ids)
+            }
+        } catch {
+            AppLogger.storage.error("measurementIDs query failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     func queryDataPoints(sql: String, arguments: StatementArguments = StatementArguments()) -> [DataPoint] {
         do {
             return try db.dbQueue.read { db in

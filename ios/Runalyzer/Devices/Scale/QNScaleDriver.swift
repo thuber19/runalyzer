@@ -34,7 +34,7 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
         didSet { persistLastMeasurement() }
     }
 
-    // M7: persist last measurement key
+    // M7: persist last measurement (Keychain — contains PII via UserProfile)
     private static let lastMeasurementKey = "runalyzer_last_scale_measurement"
 
     // MARK: - BLE
@@ -65,10 +65,16 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
         self.peripheral = peripheral
         self.id = peripheral.identifier
         self.displayName = peripheral.name ?? "QN-Scale"
-        // M7: restore last measurement from UserDefaults
-        if let data = UserDefaults.standard.data(forKey: Self.lastMeasurementKey),
+        // M7: restore last measurement from Keychain (migrating from UserDefaults if needed)
+        if let data = Keychain.load(key: Self.lastMeasurementKey),
            let measurement = try? JSONDecoder().decode(ScaleMeasurement.self, from: data) {
             _lastMeasurement = Published(initialValue: measurement)
+        } else if let data = UserDefaults.standard.data(forKey: Self.lastMeasurementKey),
+                  let measurement = try? JSONDecoder().decode(ScaleMeasurement.self, from: data) {
+            // Migrate from UserDefaults to Keychain
+            _lastMeasurement = Published(initialValue: measurement)
+            Keychain.save(data, key: Self.lastMeasurementKey)
+            UserDefaults.standard.removeObject(forKey: Self.lastMeasurementKey)
         }
         super.init()
     }
@@ -76,7 +82,7 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
     private func persistLastMeasurement() {
         guard let m = lastMeasurement,
               let data = try? JSONEncoder().encode(m) else { return }
-        UserDefaults.standard.set(data, forKey: Self.lastMeasurementKey)
+        Keychain.save(data, key: Self.lastMeasurementKey)
     }
 
     // MARK: - DeviceDriver lifecycle

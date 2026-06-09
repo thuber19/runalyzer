@@ -25,14 +25,16 @@ class RecoveryMeasurementProvider {
         processFromMetricIndex(days: missingDays)
     }
 
-    func backfillHistory(days: Int = 90) {
-        guard let store = measurementStore else { return }
+    func backfillHistory(days: Int = 90, completion: (() -> Void)? = nil) {
+        guard let store = measurementStore else { completion?(); return }
         let missingDays = findMissingDays(in: store, lookbackDays: days)
         guard !missingDays.isEmpty else {
             AppLogger.health.info("Recovery backfill: no missing days")
+            completion?()
             return
         }
         processFromMetricIndex(days: missingDays)
+        completion?()
     }
 
     // MARK: - Private

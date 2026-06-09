@@ -1,10 +1,18 @@
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var appWiring: AppWiring
     @State private var isImporting = false
     @State private var isComputingRecovery = false
+    @State private var showExportShare = false
+    @State private var exportURL: URL?
+    @State private var showImportPicker = false
+    @State private var importError: String?
+    @State private var showImportError = false
+    @State private var dbInfo: DatabaseSync.DatabaseInfo?
 
     var body: some View {
         NavigationStack {
@@ -55,9 +63,10 @@ struct SettingsView: View {
                     // Compute stress scores from imported metrics
                     Button(action: {
                         isComputingRecovery = true
-                        appWiring.recoveryProvider?.backfillHistory(days: 90)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                            isComputingRecovery = false
+                        appWiring.recoveryProvider?.backfillHistory(days: 90) {
+                            DispatchQueue.main.async {
+                                isComputingRecovery = false
+                            }
                         }
                     }) {
                         HStack {
@@ -71,6 +80,43 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(isComputingRecovery)
+                    .listRowBackground(Color(hex: 0x16213e))
+                }
+
+                // Database
+                Section("Database") {
+                    if let info = dbInfo {
+                        HStack {
+                            Text("Size")
+                            Spacer()
+                            Text(info.fileSizeString).foregroundColor(.gray)
+                        }
+                        .listRowBackground(Color(hex: 0x16213e))
+                        HStack {
+                            Text("Records")
+                            Spacer()
+                            Text("\(info.measurementCount) measurements · \(info.workoutCount) workouts · \(info.dataPointCount) data points")
+                                .font(.caption2).foregroundColor(.gray)
+                        }
+                        .listRowBackground(Color(hex: 0x16213e))
+                    }
+
+                    Button(action: {
+                        do {
+                            exportURL = try DatabaseSync.exportToTempFile()
+                            showExportShare = true
+                        } catch {
+                            importError = error.localizedDescription
+                            showImportError = true
+                        }
+                    }) {
+                        Label("Export Database", systemImage: "square.and.arrow.up")
+                    }
+                    .listRowBackground(Color(hex: 0x16213e))
+
+                    Button(action: { showImportPicker = true }) {
+                        Label("Import Database", systemImage: "square.and.arrow.down")
+                    }
                     .listRowBackground(Color(hex: 0x16213e))
                 }
 
@@ -101,6 +147,37 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Color(hex: 0x1a1a2e))
             .navigationTitle("Settings")
+            .onAppear { dbInfo = DatabaseSync.databaseInfo() }
+            .sheet(isPresented: $showExportShare) {
+                if let url = exportURL {
+                    ActivityShareSheet(items: [url])
+                }
+            }
+            .fileImporter(isPresented: $showImportPicker,
+                          allowedContentTypes: [.database, .data],
+                          onCompletion: { result in
+                switch result {
+                case .success(let url):
+                    guard url.startAccessingSecurityScopedResource() else { return }
+                    defer { url.stopAccessingSecurityScopedResource() }
+                    do {
+                        try DatabaseSync.importDatabase(from: url)
+                        dbInfo = DatabaseSync.databaseInfo()
+                    } catch {
+                        importError = error.localizedDescription
+                        showImportError = true
+                    }
+                case .failure(let error):
+                    importError = error.localizedDescription
+                    showImportError = true
+                }
+            })
+            .alert("Import Error", isPresented: $showImportError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(importError ?? "Unknown error")
+            }
         }
     }
 }
+

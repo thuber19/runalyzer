@@ -151,10 +151,14 @@ struct SleepTrendView: View {
         return h > 0 ? "\(h)h \(String(format: "%02d", min))m" : "\(min)m"
     }
 
-    private func shortDate(_ d: Date) -> String {
+    private static let shortDateFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "d MMM"
-        return f.string(from: d)
+        return f
+    }()
+
+    private func shortDate(_ d: Date) -> String {
+        Self.shortDateFmt.string(from: d)
     }
 
     private func statCol(_ value: String, _ label: String) -> some View {

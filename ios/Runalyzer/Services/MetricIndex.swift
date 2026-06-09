@@ -61,16 +61,10 @@ struct MetricIndex {
     /// All measurements containing at least one DataPoint of the given type, in date range.
     func measurements(containingType type: String,
                       from startDate: Date, to endDate: Date) -> [SensorMeasurement] {
-        store.measurements
-            .filter { m in m.date >= startDate && m.date <= endDate }
-            .filter { m in
-                // Check via SQL whether this measurement has DataPoints of the given type
-                let count = store.queryDataPoints(
-                    sql: "SELECT * FROM data_point WHERE measurementId = ? AND type = ? LIMIT 1",
-                    arguments: [m.id.uuidString, type]
-                ).count
-                return count > 0
-            }
+        // Single JOIN query replaces per-measurement N+1 lookups
+        let ids = store.measurementIDs(containingType: type, from: startDate, to: endDate)
+        return store.measurements
+            .filter { ids.contains($0.id.uuidString) }
             .sorted { $0.date < $1.date }
     }
 
@@ -81,20 +75,11 @@ struct MetricIndex {
         let dayStart = cal.startOfDay(for: date)
         guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return nil }
 
-        // Find a .metric measurement for this day that has DataPoints of the given type
-        let candidates = store.measurements.filter { m in
-            m.type == .metric && m.date >= dayStart && m.date < dayEnd
-        }
-        for m in candidates {
-            let hasType = !store.queryDataPoints(
-                sql: "SELECT * FROM data_point WHERE measurementId = ? AND type = ? LIMIT 1",
-                arguments: [m.id.uuidString, type]
-            ).isEmpty
-            if hasType {
-                // Return full measurement with DataPoints loaded
-                return store.fullMeasurement(byID: m.id)
-            }
-        }
-        return nil
+        // Single query to find the matching measurement ID
+        let ids = store.measurementIDs(containingType: type, from: dayStart, to: dayEnd,
+                                        measurementType: .metric)
+        guard let firstID = ids.first,
+              let uuid = UUID(uuidString: firstID) else { return nil }
+        return store.fullMeasurement(byID: uuid)
     }
 }

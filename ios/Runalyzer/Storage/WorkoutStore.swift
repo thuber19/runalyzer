@@ -4,30 +4,40 @@ import GRDB
 import os
 
 /// Storage for workout entities. Backed by GRDB/SQLite.
-/// Workouts are lightweight summary rows; time-series data (HR, cadence)
-/// is queried from the shared `data_point` table by time window.
+/// Auto-updates via ValueObservation when the database changes.
 class WorkoutStore: ObservableObject {
     @Published var workouts: [Workout] = []
 
     private let db: AppDatabase
+    private var observationCancellable: AnyDatabaseCancellable?
 
     init(db: AppDatabase? = nil) {
         self.db = db ?? AppDatabase.shared
-        loadWorkouts()
+        startObservation()
     }
 
-    private func loadWorkouts() {
-        do {
-            workouts = try db.dbQueue.read { db in
-                try WorkoutRecord
-                    .order(Column("startDate").desc)
-                    .fetchAll(db)
-                    .map { $0.toModel() }
-            }
-        } catch {
-            AppLogger.storage.error("Failed to load workouts: \(error.localizedDescription)")
-            workouts = []
+    // MARK: - Reactive Observation
+
+    private func startObservation() {
+        let observation = ValueObservation.tracking { db in
+            try WorkoutRecord
+                .order(Column("startDate").desc)
+                .fetchAll(db)
+                .map { $0.toModel() }
         }
+
+        observationCancellable = observation.start(
+            in: db.dbQueue,
+            scheduling: .immediate,
+            onError: { error in
+                AppLogger.storage.error("Workout observation error: \(error.localizedDescription)")
+            },
+            onChange: { [weak self] workouts in
+                DispatchQueue.main.async {
+                    self?.workouts = workouts
+                }
+            }
+        )
     }
 
     // MARK: - Query
@@ -36,12 +46,10 @@ class WorkoutStore: ObservableObject {
         workouts.first(where: { $0.id == id })
     }
 
-    /// Workouts within a date range.
     func workouts(from startDate: Date, to endDate: Date) -> [Workout] {
         workouts.filter { $0.startDate >= startDate && $0.startDate <= endDate }
     }
 
-    /// Check if a HealthKit workout ID already exists (dedup).
     func hasWorkout(hkID: String) -> Bool {
         do {
             return try db.dbQueue.read { db in
@@ -49,10 +57,12 @@ class WorkoutStore: ObservableObject {
                     .filter(Column("hkWorkoutId") == hkID)
                     .fetchCount(db) > 0
             }
-        } catch { return false }
+        } catch {
+            AppLogger.storage.error("hasWorkout query failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
-    /// All existing HealthKit workout IDs (for batch dedup during import).
     func existingHKWorkoutIDs() -> Set<String> {
         do {
             return try db.dbQueue.read { db in
@@ -61,13 +71,14 @@ class WorkoutStore: ObservableObject {
                     """)
                 return Set(ids)
             }
-        } catch { return [] }
+        } catch {
+            AppLogger.storage.error("existingHKWorkoutIDs query failed: \(error.localizedDescription)")
+            return []
+        }
     }
 
-    // MARK: - DataPoints (shared time-series via time window)
+    // MARK: - Shared DataPoints (time window queries)
 
-    /// Fetch DataPoints from the shared `data_point` table that fall within this workout's time range.
-    /// This is the key relationship: workouts reference data by time window, not by foreign key.
     func sharedDataPoints(for workout: Workout, type: String? = nil) -> [DataPoint] {
         do {
             return try db.dbQueue.read { db in
@@ -91,7 +102,6 @@ class WorkoutStore: ObservableObject {
         } catch { return [] }
     }
 
-    /// Fetch workout-specific DataPoints (e.g., IMU cadence windows, peak G).
     func workoutDataPoints(for workout: Workout) -> [DataPoint] {
         do {
             return try db.dbQueue.read { db in
@@ -108,11 +118,10 @@ class WorkoutStore: ObservableObject {
 
     @discardableResult
     func save(_ workout: Workout, dataPoints: [DataPoint] = []) -> Bool {
-        assert(Thread.isMainThread, "WorkoutStore.save must be called on main thread")
-        if workouts.contains(where: { $0.id == workout.id }) { return true }
-
         do {
             try db.dbQueue.write { db in
+                if try WorkoutRecord.fetchOne(db, key: workout.id.uuidString) != nil { return }
+
                 let record = WorkoutRecord(from: workout)
                 try record.insert(db)
 
@@ -121,25 +130,20 @@ class WorkoutStore: ObservableObject {
                     try wdpRecord.insert(db)
                 }
             }
-            workouts.insert(workout, at: 0)
             return true
         } catch {
-            print("Failed to save workout: \(error)")
+            AppLogger.storage.error("Failed to save workout: \(error.localizedDescription)")
             return false
         }
     }
 
     @discardableResult
     func saveBatch(_ newWorkouts: [(workout: Workout, dataPoints: [DataPoint])]) -> Bool {
-        assert(Thread.isMainThread, "WorkoutStore.saveBatch must be called on main thread")
-        let toInsert = newWorkouts.filter { w in
-            !workouts.contains(where: { $0.id == w.workout.id })
-        }
-        guard !toInsert.isEmpty else { return true }
-
         do {
             try db.dbQueue.write { db in
-                for (workout, dataPoints) in toInsert {
+                for (workout, dataPoints) in newWorkouts {
+                    if try WorkoutRecord.fetchOne(db, key: workout.id.uuidString) != nil { continue }
+
                     let record = WorkoutRecord(from: workout)
                     try record.insert(db)
 
@@ -149,12 +153,9 @@ class WorkoutStore: ObservableObject {
                     }
                 }
             }
-            for (workout, _) in toInsert {
-                workouts.insert(workout, at: 0)
-            }
             return true
         } catch {
-            print("Failed to save workout batch: \(error)")
+            AppLogger.storage.error("Failed to save workout batch: \(error.localizedDescription)")
             return false
         }
     }
@@ -163,48 +164,36 @@ class WorkoutStore: ObservableObject {
 
     @discardableResult
     func delete(_ id: UUID) -> Bool {
-        assert(Thread.isMainThread, "WorkoutStore.delete must be called on main thread")
         do {
+            let files = workout(byID: id)?.rawDataFiles ?? []
             try db.dbQueue.write { db in
                 try db.execute(sql: "DELETE FROM workout WHERE id = ?", arguments: [id.uuidString])
             }
-            if let idx = workouts.firstIndex(where: { $0.id == id }) {
-                let w = workouts[idx]
-                for file in w.rawDataFiles {
-                    try? FileManager.default.removeItem(
-                        at: AppDatabase.storageDir.appendingPathComponent(file))
-                }
-                workouts.remove(at: idx)
+            for file in files {
+                try? FileManager.default.removeItem(at: AppDatabase.storageDir.appendingPathComponent(file))
             }
             return true
         } catch {
-            print("Failed to delete workout: \(error)")
+            AppLogger.storage.error("Failed to delete workout: \(error.localizedDescription)")
             return false
         }
     }
 
     @discardableResult
     func deleteBatch(_ ids: Set<UUID>) -> Bool {
-        assert(Thread.isMainThread, "WorkoutStore.deleteBatch must be called on main thread")
         do {
+            let files = ids.compactMap { workout(byID: $0) }.flatMap(\.rawDataFiles)
             try db.dbQueue.write { db in
                 for id in ids {
                     try db.execute(sql: "DELETE FROM workout WHERE id = ?", arguments: [id.uuidString])
                 }
             }
-            for id in ids {
-                if let idx = workouts.firstIndex(where: { $0.id == id }) {
-                    let w = workouts[idx]
-                    for file in w.rawDataFiles {
-                        try? FileManager.default.removeItem(
-                            at: AppDatabase.storageDir.appendingPathComponent(file))
-                    }
-                    workouts.remove(at: idx)
-                }
+            for file in files {
+                try? FileManager.default.removeItem(at: AppDatabase.storageDir.appendingPathComponent(file))
             }
             return true
         } catch {
-            print("Failed to delete workout batch: \(error)")
+            AppLogger.storage.error("Failed to delete workout batch: \(error.localizedDescription)")
             return false
         }
     }
@@ -219,12 +208,6 @@ class WorkoutStore: ObservableObject {
                                arguments: [id2.uuidString, id1.uuidString])
                 try db.execute(sql: "UPDATE workout SET linkedWorkoutId = ? WHERE id = ?",
                                arguments: [id1.uuidString, id2.uuidString])
-            }
-            if let idx1 = workouts.firstIndex(where: { $0.id == id1 }) {
-                workouts[idx1].linkedWorkoutId = id2
-            }
-            if let idx2 = workouts.firstIndex(where: { $0.id == id2 }) {
-                workouts[idx2].linkedWorkoutId = id1
             }
             return true
         } catch { return false }

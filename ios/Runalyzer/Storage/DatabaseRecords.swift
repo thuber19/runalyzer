@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 // MARK: - Measurement Record
 
@@ -25,7 +26,10 @@ struct MeasurementRecord: Codable, FetchableRecord, PersistableRecord {
     }
 
     func toModel(sources: [MeasurementSource] = [], dataPoints: [DataPoint] = []) -> SensorMeasurement {
-        SensorMeasurement(
+        if UUID(uuidString: id) == nil {
+            AppLogger.storage.error("Corrupt measurement UUID: \(id) — generating replacement")
+        }
+        return SensorMeasurement(
             id: UUID(uuidString: id) ?? UUID(),
             date: Date(timeIntervalSince1970: date),
             type: MeasurementType(rawValue: type) ?? .metric,
@@ -151,7 +155,10 @@ struct WorkoutRecord: Codable, FetchableRecord, PersistableRecord {
     }
 
     func toModel() -> Workout {
-        Workout(
+        if UUID(uuidString: id) == nil {
+            AppLogger.storage.error("Corrupt workout UUID: \(id) — generating replacement")
+        }
+        return Workout(
             id: UUID(uuidString: id) ?? UUID(),
             startDate: Date(timeIntervalSince1970: startDate),
             endDate: Date(timeIntervalSince1970: endDate),

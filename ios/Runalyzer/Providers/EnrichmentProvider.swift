@@ -5,9 +5,11 @@ import Foundation
 /// Pipeline: IMU session + Watch workout data → SessionEnrichment algorithm → measurement → store.
 class EnrichmentProvider {
     private weak var measurementStore: MeasurementStore?
+    private weak var workoutStore: WorkoutStore?
 
-    init(measurementStore: MeasurementStore) {
+    init(measurementStore: MeasurementStore, workoutStore: WorkoutStore) {
         self.measurementStore = measurementStore
+        self.workoutStore = workoutStore
     }
 
     /// Create an enriched measurement combining IMU session data with Apple Watch workout data.
@@ -22,7 +24,9 @@ class EnrichmentProvider {
         }
         guard !alreadyEnriched else { return }
 
-        let imuID = SessionEnrichment.findIMUMeasurement(for: session, in: store)
+        let imuID = workoutStore.flatMap {
+            SessionEnrichment.findIMUWorkout(for: session, in: $0)
+        }
         let input = SessionEnrichment.Input(
             session: session,
             workout: workout,

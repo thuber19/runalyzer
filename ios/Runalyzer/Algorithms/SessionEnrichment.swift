@@ -126,15 +126,15 @@ enum SessionEnrichment {
         )
     }
 
-    // MARK: - Convenience: find IMU measurement by date
+    // MARK: - Convenience: find IMU workout by date
 
-    /// Looks up the SensorMeasurement in the store whose date is within 30s of the session date.
+    /// Looks up the Workout in the store whose date is within 30s of the session date.
     /// Used to populate `inputMeasurements` provenance on the derived record.
-    static func findIMUMeasurement(for session: RunSession,
-                                   in store: MeasurementStore) -> UUID? {
-        store.measurements
-            .filter { $0.type == .workout }
-            .first { abs($0.date.timeIntervalSince(session.date)) < 30 }?
+    static func findIMUWorkout(for session: RunSession,
+                               in workoutStore: WorkoutStore) -> UUID? {
+        workoutStore.workouts
+            .filter { $0.activityType == "IMU Recording" }
+            .first { abs($0.startDate.timeIntervalSince(session.date)) < 30 }?
             .id
     }
 }

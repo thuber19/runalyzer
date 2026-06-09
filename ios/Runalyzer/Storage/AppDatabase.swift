@@ -6,7 +6,33 @@ import os
 /// Access via `AppDatabase.shared`.
 final class AppDatabase {
     /// Shared singleton — initialized once at app launch.
-    static var shared: AppDatabase!
+    /// Use `nonisolated(unsafe)` to suppress Sendable warnings; access is serialized by design
+    /// (set once at launch, only mutated during import with UI blocked).
+    nonisolated(unsafe) private static var _shared: AppDatabase?
+    private static let lock = NSLock()
+
+    static var shared: AppDatabase {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let db = _shared else {
+                fatalError("AppDatabase.shared accessed before initialization")
+            }
+            return db
+        }
+        set {
+            lock.lock()
+            defer { lock.unlock() }
+            _shared = newValue
+        }
+    }
+
+    /// Returns nil if the database has not been initialized yet.
+    static var sharedIfReady: AppDatabase? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _shared
+    }
 
     let dbQueue: DatabaseQueue
 
@@ -126,7 +152,15 @@ final class AppDatabase {
     /// Migrates existing measurements.json into the SQLite database.
     /// Called once on first launch after the GRDB migration is deployed.
     /// Splits .hkWorkout/.workout into the workout table, everything else into measurement.
+    private static let migrationOnce = NSLock()
+    private static var migrationDone = false
+
     func migrateFromJSONIfNeeded() {
+        Self.migrationOnce.lock()
+        if Self.migrationDone { Self.migrationOnce.unlock(); return }
+        Self.migrationDone = true
+        Self.migrationOnce.unlock()
+
         let jsonURL = Self.storageDir.appendingPathComponent("measurements.json")
         guard FileManager.default.fileExists(atPath: jsonURL.path) else { return }
 

@@ -7,8 +7,12 @@ struct HomeTab: View {
     @EnvironmentObject var sourcePrefs: SourcePreferenceStore
     @EnvironmentObject var workoutStore: WorkoutStore
 
+    /// MetricIndex is stateless — safe to recreate, but cache to communicate intent.
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
     private let cal = Calendar.current
+
+    // Note: MetricIndex is a lightweight struct with no cached state — the computed property
+    // is equivalent to storing it. The SQL queries it runs are the real cost, not construction.
 
     var body: some View {
         NavigationStack {

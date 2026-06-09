@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import UserNotifications
 import GRDB
+import os
 
 @main
 struct RunalyzerApp: App {
@@ -16,13 +17,18 @@ struct RunalyzerApp: App {
     // Legacy — kept for existing session detail views that still reference SessionStore
     @StateObject private var sessions = SessionStore()
 
+    @State private var databaseFailed = false
+
     init() {
         // Initialize database before stores
         do {
             AppDatabase.shared = try AppDatabase.openDefault()
             AppDatabase.shared.migrateFromJSONIfNeeded()
         } catch {
-            fatalError("Failed to open database: \(error)")
+            // Fall back to in-memory database so the app can still launch
+            AppLogger.storage.error("Failed to open database: \(error.localizedDescription). Falling back to in-memory DB.")
+            AppDatabase.shared = (try? AppDatabase.inMemory()) ?? AppDatabase.shared
+            _databaseFailed = State(initialValue: true)
         }
         _store = StateObject(wrappedValue: MeasurementStore())
         _workoutStore = StateObject(wrappedValue: WorkoutStore())
@@ -44,6 +50,11 @@ struct RunalyzerApp: App {
                     appWiring.setup(coordinator: coordinator, metrics: metrics,
                                    store: store, workoutStore: workoutStore,
                                    healthKit: healthKit, sessions: sessions)
+                }
+                .alert("Database Error", isPresented: $databaseFailed) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("The database could not be opened. Running with a temporary in-memory database — your data will not be saved until the issue is resolved. Try restarting the app.")
                 }
                 .alert("Data Recovery", isPresented: $sessions.corruptDataDetected) {
                     Button("OK", role: .cancel) {}
@@ -153,7 +164,9 @@ class AppWiring: ObservableObject {
         -> (any DeviceDriver) -> AnyCancellable? {
         { [weak metrics, weak imuProvider] driver in
             guard let imu = driver as? IMUSensorDriver else { return nil }
-            imu.onPacket = { [weak metrics] packet in metrics?.process(packet) }
+            imu.onPacket = { [weak metrics] packet in
+                DispatchQueue.main.async { metrics?.process(packet) }
+            }
             imu.onDownloadComplete = { [weak imuProvider, weak imu] samples, status, events in
                 guard let imu else { return }
                 // Provider handles: analysis → measurement + legacy session → save → erase
@@ -170,23 +183,6 @@ class AppWiring: ObservableObject {
         }
     }
 
-    private func stripHeartRateSamplesFromMetricsIfNeeded() {
-        let key = "migration_strip_hr_samples_v2"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        do {
-            try AppDatabase.shared.dbQueue.write { db in
-                try db.execute(sql: """
-                    DELETE FROM data_point
-                    WHERE type = ? AND measurementId IN (
-                        SELECT id FROM measurement WHERE type = 'metric'
-                    )
-                    """, arguments: [DataType.heartRateSample])
-            }
-        } catch {
-            print("HR sample cleanup failed: \(error)")
-        }
-        UserDefaults.standard.set(true, forKey: key)
-    }
 
     private static func scaleHandler(scaleProvider: ScaleMeasurementProvider?) -> (any DeviceDriver) -> AnyCancellable? {
         { [weak scaleProvider] driver in

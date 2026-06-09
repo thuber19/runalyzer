@@ -87,6 +87,7 @@ struct SessionDetailView: View {
     @EnvironmentObject var sessions: SessionStore
     @EnvironmentObject var healthKit: HealthKitManager
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var workoutStore: WorkoutStore
     @State private var shareURL: ShareableURL?
 
     private static let eventFmt: DateFormatter = {
@@ -238,14 +239,14 @@ struct SessionDetailView: View {
             }
         }
         .sheet(item: $shareURL) { item in
-            ShareSheet(items: [item.url])
+            ActivityShareSheet(items: [item.url])
         }
     }
 
     // MARK: - Session Enrichment
 
     private func saveEnrichment(workout: AppleWorkout, runData: AppleRunData) {
-        let provider = EnrichmentProvider(measurementStore: measurementStore)
+        let provider = EnrichmentProvider(measurementStore: measurementStore, workoutStore: workoutStore)
         provider.enrichSession(session, workout: workout, runData: runData)
     }
 
@@ -718,7 +719,7 @@ struct ShareableURL: Identifiable {
     let url: URL
 }
 
-struct ShareSheet: UIViewControllerRepresentable {
+struct ActivityShareSheet: UIViewControllerRepresentable {
     let items: [Any]
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: items, applicationActivities: nil)

@@ -331,7 +331,7 @@ struct WorkoutDetailView: View {
         AxisMarks(values: .automatic(desiredCount: 5)) { value in
             AxisValueLabel {
                 if let date = value.as(Date.self) {
-                    Text(timeFmt.string(from: date)).font(.caption2).foregroundColor(.gray)
+                    Text(Self.timeFmt.string(from: date)).font(.caption2).foregroundColor(.gray)
                 }
             }
         }
@@ -349,9 +349,9 @@ struct WorkoutDetailView: View {
         }
     }
 
-    private var timeFmt: DateFormatter {
+    private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
         return f
-    }
+    }()
 }

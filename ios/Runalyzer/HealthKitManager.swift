@@ -30,12 +30,14 @@ struct AppleWorkout: Identifiable {
     }
 
     var distanceKm: Double {
-        let stats = workout.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!)
+        guard let type = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) else { return 0 }
+        let stats = workout.statistics(for: type)
         return (stats?.sumQuantity()?.doubleValue(for: .meter()) ?? 0) / 1000
     }
 
     var calories: Double {
-        let stats = workout.statistics(for: HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)
+        guard let type = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else { return 0 }
+        let stats = workout.statistics(for: type)
         return stats?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
     }
 }
@@ -369,13 +371,13 @@ class HealthKitManager: ObservableObject {
         // Window end: noon today (or now if before noon, so we don't miss this morning)
         var noonComps = cal.dateComponents([.year, .month, .day], from: now)
         noonComps.hour = 12
-        let todayNoon = cal.date(from: noonComps)!
+        guard let todayNoon = cal.date(from: noonComps) else { return }
         let windowEnd = min(todayNoon, now)
 
         // Window start: 8pm yesterday
         var eveningComps = cal.dateComponents([.year, .month, .day], from: now.addingTimeInterval(-86400))
         eveningComps.hour = 20
-        let windowStart = cal.date(from: eveningComps)!
+        guard let windowStart = cal.date(from: eveningComps) else { return }
 
         let predicate = HKQuery.predicateForSamples(withStart: windowStart, end: windowEnd, options: .strictStartDate)
 
@@ -614,12 +616,12 @@ class HealthKitManager: ObservableObject {
                 let activityName = Self.workoutActivityName(w.workoutActivityType)
 
                 // Try walking/running distance first, then cycling distance
-                let walkDist = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning)!)
-                let cycleDist = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .distanceCycling)!)
+                let walkDist = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning).flatMap { w.statistics(for: $0) }
+                let cycleDist = HKQuantityType.quantityType(forIdentifier: .distanceCycling).flatMap { w.statistics(for: $0) }
                 let distMeters = (walkDist?.sumQuantity()?.doubleValue(for: .meter()) ?? 0)
                     + (cycleDist?.sumQuantity()?.doubleValue(for: .meter()) ?? 0)
-                let calStats = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!)
-                let hrStats = w.statistics(for: HKQuantityType.quantityType(forIdentifier: .heartRate)!)
+                let calStats = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned).flatMap { w.statistics(for: $0) }
+                let hrStats = HKQuantityType.quantityType(forIdentifier: .heartRate).flatMap { w.statistics(for: $0) }
 
                 return WorkoutDetail(
                     id: w.uuid,
