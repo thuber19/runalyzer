@@ -6,6 +6,7 @@ struct HomeTab: View {
     @EnvironmentObject var measurementStore: MeasurementStore
     @EnvironmentObject var sourcePrefs: SourcePreferenceStore
     @EnvironmentObject var workoutStore: WorkoutStore
+    @EnvironmentObject var habitStore: HabitStore
 
     /// MetricIndex is stateless — safe to recreate, but cache to communicate intent.
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
@@ -37,6 +38,11 @@ struct HomeTab: View {
 
                     NavigationLink(destination: SleepTrendView()) {
                         sleepTile
+                    }
+                    .buttonStyle(.plain)
+
+                    NavigationLink(destination: HabitsView()) {
+                        habitsTile
                     }
                     .buttonStyle(.plain)
 
@@ -276,6 +282,43 @@ struct HomeTab: View {
     }
 
     // MARK: - Workouts Tile
+
+    // MARK: - Habits Tile
+
+    private var habitsTile: some View {
+        let today = cal.startOfDay(for: Date())
+        let scheduled = habitStore.habits.filter { $0.isScheduled(on: today) }
+        let completed = scheduled.filter { habit in
+            habitStore.todayLogs.contains { $0.habitId == habit.id && $0.isCompleted }
+        }.count
+
+        return tile {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("HABITS").font(.caption2).foregroundColor(.gray)
+                if scheduled.isEmpty {
+                    Text("No habits yet").font(.caption).foregroundColor(.gray)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text("\(completed)").font(.title.bold().monospacedDigit())
+                        Text("/ \(scheduled.count)").font(.caption).foregroundColor(.gray)
+                    }
+                    // Show first few habit names
+                    ForEach(scheduled.prefix(3)) { habit in
+                        let done = habitStore.todayLogs.contains { $0.habitId == habit.id && $0.isCompleted }
+                        HStack(spacing: 6) {
+                            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                                .font(.caption)
+                                .foregroundColor(done ? Color(hex: habit.color) : .gray)
+                            Text(habit.name).font(.caption).foregroundColor(done ? .white : .gray)
+                        }
+                    }
+                    if scheduled.count > 3 {
+                        Text("+\(scheduled.count - 3) more").font(.caption2).foregroundColor(.gray)
+                    }
+                }
+            }
+        }
+    }
 
     private var workoutsTile: some View {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!

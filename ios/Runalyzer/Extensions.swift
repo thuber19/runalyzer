@@ -9,6 +9,13 @@ extension Color {
             opacity: opacity)
     }
 
+    /// Initialize from a hex string (e.g. "4CAF50" or "#4CAF50").
+    init(hex string: String, opacity: Double = 1.0) {
+        let clean = string.trimmingCharacters(in: .init(charactersIn: "#"))
+        let value = UInt(clean, radix: 16) ?? 0
+        self.init(hex: value, opacity: opacity)
+    }
+
     // MARK: - App Palette (L2)
     /// Deep navy — main screen background
     static let appBackground  = Color(hex: 0x1a1a2e)

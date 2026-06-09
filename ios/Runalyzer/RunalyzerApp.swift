@@ -14,6 +14,7 @@ struct RunalyzerApp: App {
     @StateObject private var appWiring = AppWiring()
     @StateObject private var sourcePrefs = SourcePreferenceStore()
     @StateObject private var profileProvider: UserProfileProvider
+    @StateObject private var habitStore: HabitStore
 
     @State private var databaseFailed = false
 
@@ -30,6 +31,7 @@ struct RunalyzerApp: App {
         _store = StateObject(wrappedValue: MeasurementStore())
         _workoutStore = StateObject(wrappedValue: WorkoutStore())
         _profileProvider = StateObject(wrappedValue: UserProfileProvider())
+        _habitStore = StateObject(wrappedValue: HabitStore())
     }
 
     var body: some Scene {
@@ -43,12 +45,14 @@ struct RunalyzerApp: App {
                 .environmentObject(sourcePrefs)
                 .environmentObject(workoutStore)
                 .environmentObject(profileProvider)
+                .environmentObject(habitStore)
                 .onAppear {
                     healthKit.requestAuthorization()
                     profileProvider.autoFillFromHealthKit()
                     appWiring.setup(coordinator: coordinator, metrics: metrics,
                                    store: store, workoutStore: workoutStore,
-                                   healthKit: healthKit, profileProvider: profileProvider)
+                                   healthKit: healthKit, profileProvider: profileProvider,
+                                   habitStore: habitStore)
                 }
                 .alert("Database Error", isPresented: $databaseFailed) {
                     Button("OK", role: .cancel) {}
@@ -71,12 +75,14 @@ class AppWiring: ObservableObject {
     private var imuProvider: IMUMeasurementProvider?
     private(set) var recoveryProvider: RecoveryMeasurementProvider?
     private(set) var metricProvider: HealthKitMetricProvider?
+    private(set) var habitProvider: HabitProvider?
 
     private var profileProvider: UserProfileProvider?
 
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, workoutStore: WorkoutStore,
-               healthKit: HealthKitManager, profileProvider: UserProfileProvider) {
+               healthKit: HealthKitManager, profileProvider: UserProfileProvider,
+               habitStore: HabitStore) {
         self.profileProvider = profileProvider
 
         // Clear previous subscriptions (prevents duplicates if setup called multiple times)
@@ -94,6 +100,7 @@ class AppWiring: ObservableObject {
         metricProvider = HealthKitMetricProvider(healthKit: healthKit, store: store,
                                                 workoutStore: workoutStore, metricIndex: metricIndex)
         recoveryProvider = RecoveryMeasurementProvider(metricIndex: metricIndex, measurementStore: store)
+        habitProvider = HabitProvider(habitStore: habitStore, workoutStore: workoutStore)
 
         // Per-descriptor handlers — keyed by DeviceDescriptor.id.
         // To add a new device: add one entry here + create a provider.
@@ -153,6 +160,7 @@ class AppWiring: ObservableObject {
     func refreshMetricsAndRecovery() {
         metricProvider?.importMissingMetrics { [weak self] in
             self?.recoveryProvider?.computeMissingScores()
+            self?.habitProvider?.processAutoFulfillment()
         }
     }
 

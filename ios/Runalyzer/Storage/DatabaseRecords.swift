@@ -254,3 +254,81 @@ struct UserProfileRecord: Codable, FetchableRecord, PersistableRecord {
         )
     }
 }
+
+// MARK: - Habit Record
+
+struct HabitRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "habit"
+
+    var id: String
+    var name: String
+    var icon: String
+    var color: String
+    var scheduleType: String
+    var scheduleParam: Int
+    var linkedActivityType: String?
+    var createdAt: Double
+    var archivedAt: Double?
+    var sortOrder: Int
+
+    init(from model: Habit) {
+        self.id = model.id.uuidString
+        self.name = model.name
+        self.icon = model.icon
+        self.color = model.color
+        self.scheduleType = model.scheduleType.rawValue
+        self.scheduleParam = model.scheduleParam
+        self.linkedActivityType = model.linkedActivityType
+        self.createdAt = model.createdAt.timeIntervalSince1970
+        self.archivedAt = model.archivedAt?.timeIntervalSince1970
+        self.sortOrder = model.sortOrder
+    }
+
+    func toModel() -> Habit {
+        Habit(
+            id: UUID(uuidString: id) ?? UUID(),
+            name: name,
+            icon: icon,
+            color: color,
+            scheduleType: Habit.ScheduleType(rawValue: scheduleType) ?? .daily,
+            scheduleParam: scheduleParam,
+            linkedActivityType: linkedActivityType,
+            createdAt: Date(timeIntervalSince1970: createdAt),
+            archivedAt: archivedAt.map { Date(timeIntervalSince1970: $0) },
+            sortOrder: sortOrder
+        )
+    }
+}
+
+// MARK: - Habit Log Record
+
+struct HabitLogRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "habit_log"
+
+    var id: Int64?
+    var habitId: String
+    var date: Double
+    var completedAt: Double?
+    var autoFulfilled: Int
+    var workoutId: String?
+
+    init(from model: HabitLog) {
+        self.id = model.id == 0 ? nil : model.id
+        self.habitId = model.habitId.uuidString
+        self.date = model.date.timeIntervalSince1970
+        self.completedAt = model.completedAt?.timeIntervalSince1970
+        self.autoFulfilled = model.autoFulfilled ? 1 : 0
+        self.workoutId = model.workoutId?.uuidString
+    }
+
+    func toModel() -> HabitLog {
+        HabitLog(
+            id: id ?? 0,
+            habitId: UUID(uuidString: habitId) ?? UUID(),
+            date: Date(timeIntervalSince1970: date),
+            completedAt: completedAt.map { Date(timeIntervalSince1970: $0) },
+            autoFulfilled: autoFulfilled != 0,
+            workoutId: workoutId.flatMap { UUID(uuidString: $0) }
+        )
+    }
+}

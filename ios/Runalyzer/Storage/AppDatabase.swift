@@ -239,6 +239,34 @@ final class AppDatabase {
             }
         }
 
+        migrator.registerMigration("v3-habits") { db in
+            try db.create(table: "habit") { t in
+                t.primaryKey("id", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("icon", .text).notNull().defaults(to: "checkmark.circle")
+                t.column("color", .text).notNull().defaults(to: "4CAF50")
+                t.column("scheduleType", .text).notNull().defaults(to: "daily")
+                t.column("scheduleParam", .integer).notNull().defaults(to: 1)
+                t.column("linkedActivityType", .text)
+                t.column("createdAt", .double).notNull()
+                t.column("archivedAt", .double)
+                t.column("sortOrder", .integer).notNull().defaults(to: 0)
+            }
+
+            try db.create(table: "habit_log") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.belongsTo("habit", onDelete: .cascade).notNull()
+                t.column("date", .double).notNull()
+                t.column("completedAt", .double)
+                t.column("autoFulfilled", .integer).notNull().defaults(to: 0)
+                t.column("workoutId", .text)
+            }
+            try db.create(index: "idx_habit_log_habit_date",
+                          on: "habit_log", columns: ["habitId", "date"], unique: true)
+            try db.create(index: "idx_habit_log_date",
+                          on: "habit_log", columns: ["date"])
+        }
+
         return migrator
     }
 
