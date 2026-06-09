@@ -6,11 +6,19 @@ import os
 /// The database file can be synced via rsync, HTTP, file sharing, etc.
 enum DatabaseSync {
 
-    /// Export a consistent snapshot of the database to the given URL.
-    /// Uses GRDB's backup API which creates a safe copy even while writes are happening.
+    /// Export a consistent snapshot of the encrypted database to the given URL.
+    /// Uses sqlcipher_export since GRDB's backup API doesn't support encrypted databases.
     static func exportDatabase(to destinationURL: URL) throws {
         let db = AppDatabase.shared
-        try db.dbQueue.backup(to: DatabaseQueue(path: destinationURL.path))
+        let key = Keychain.databaseKey()
+        let hexPassphrase = AppDatabase.passphraseString(from: key)
+        try db.dbQueue.inDatabase { dbConn in
+            try dbConn.execute(
+                sql: "ATTACH DATABASE ? AS export KEY ?",
+                arguments: [destinationURL.path, hexPassphrase])
+            try dbConn.execute(sql: "SELECT sqlcipher_export('export')")
+            try dbConn.execute(sql: "DETACH DATABASE export")
+        }
         AppLogger.storage.info("Database exported to \(destinationURL.lastPathComponent)")
     }
 
@@ -30,8 +38,14 @@ enum DatabaseSync {
     static func importDatabase(from sourceURL: URL) throws {
         let dbPath = AppDatabase.storageDir.appendingPathComponent("runalyzer.db")
 
-        // Validate the source is a valid SQLite database with our schema
-        let sourceQueue = try DatabaseQueue(path: sourceURL.path)
+        // Validate the source is a valid encrypted database with our schema
+        let key = Keychain.databaseKey()
+        let hexPassphrase = AppDatabase.passphraseString(from: key)
+        var sourceConfig = Configuration()
+        sourceConfig.prepareDatabase { db in
+            try db.usePassphrase(hexPassphrase)
+        }
+        let sourceQueue = try DatabaseQueue(path: sourceURL.path, configuration: sourceConfig)
         let isValid = try sourceQueue.read { db in
             // Check required tables exist
             let tables = try String.fetchAll(db, sql: """

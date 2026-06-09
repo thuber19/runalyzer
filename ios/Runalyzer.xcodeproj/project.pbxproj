@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		529677E82FD7605A003A0E61 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 529677E72FD7605A003A0E61 /* GRDB */; };
+		529677EF2FD80CE3003A0E61 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 529677EE2FD80CE3003A0E61 /* GRDB */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,7 +40,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				529677E82FD7605A003A0E61 /* GRDB in Frameworks */,
+				529677EF2FD80CE3003A0E61 /* GRDB in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -91,7 +91,7 @@
 			);
 			name = Runalyzer;
 			packageProductDependencies = (
-				529677E72FD7605A003A0E61 /* GRDB */,
+				529677EE2FD80CE3003A0E61 /* GRDB */,
 			);
 			productName = Runalyzer;
 			productReference = 529F32FC2FCC600C00273D7B /* Runalyzer.app */;
@@ -122,7 +122,7 @@
 			mainGroup = 529F32F32FCC600C00273D7B;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				529677E12FD7600A003A0E61 /* XCRemoteSwiftPackageReference "GRDB" */,
+				529677ED2FD80CE3003A0E61 /* XCRemoteSwiftPackageReference "GRDB" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 529F32FD2FCC600C00273D7B /* Products */;
@@ -374,9 +374,9 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		529677E12FD7600A003A0E61 /* XCRemoteSwiftPackageReference "GRDB" */ = {
+		529677ED2FD80CE3003A0E61 /* XCRemoteSwiftPackageReference "GRDB" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/groue/GRDB.swift";
+			repositoryURL = "https://github.com/sqlcipher/GRDB.swift";
 			requirement = {
 				kind = upToNextMajorVersion;
 				minimumVersion = 7.0.0;
@@ -385,9 +385,9 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		529677E72FD7605A003A0E61 /* GRDB */ = {
+		529677EE2FD80CE3003A0E61 /* GRDB */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 529677E12FD7600A003A0E61 /* XCRemoteSwiftPackageReference "GRDB" */;
+			package = 529677ED2FD80CE3003A0E61 /* XCRemoteSwiftPackageReference "GRDB" */;
 			productName = GRDB;
 		};
 /* End XCSwiftPackageProductDependency section */

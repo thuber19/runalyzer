@@ -1,8 +1,9 @@
 import Foundation
+import os
 
 /// Self-contained provider for session enrichment measurements.
-/// Trigger: user links an Apple Watch workout to an IMU session.
-/// Pipeline: IMU session + Watch workout data → SessionEnrichment algorithm → measurement → store.
+/// Trigger: user links an Apple Watch workout to an IMU workout.
+/// Pipeline: IMU workout + Watch workout data → SessionEnrichment algorithm → measurement → store.
 class EnrichmentProvider {
     private weak var measurementStore: MeasurementStore?
     private weak var workoutStore: WorkoutStore?
@@ -12,30 +13,26 @@ class EnrichmentProvider {
         self.workoutStore = workoutStore
     }
 
-    /// Create an enriched measurement combining IMU session data with Apple Watch workout data.
-    /// Does nothing if an enrichment already exists for this session+workout pair.
-    func enrichSession(_ session: RunSession, workout: AppleWorkout, runData: AppleRunData) {
+    /// Create an enriched measurement combining IMU workout data with Apple Watch workout data.
+    /// Does nothing if an enrichment already exists for this workout pair.
+    func enrichWorkout(_ imuWorkout: Workout, appleWorkout: AppleWorkout, runData: AppleRunData) {
         guard let store = measurementStore else { return }
 
         // Dedup: don't create a duplicate if one already exists for this workout
         let alreadyEnriched = store.measurements.contains { m in
             m.type == .derived &&
-            m.sources.contains { $0.serialNumber == DataSource.healthKit(workout.id) }
+            m.sources.contains { $0.serialNumber == DataSource.healthKit(appleWorkout.id) }
         }
         guard !alreadyEnriched else { return }
 
-        let imuID = workoutStore.flatMap {
-            SessionEnrichment.findIMUWorkout(for: session, in: $0)
-        }
         let input = SessionEnrichment.Input(
-            session: session,
-            workout: workout,
-            runData: runData,
-            imuMeasurementID: imuID
+            imuWorkout: imuWorkout,
+            appleWorkout: appleWorkout,
+            runData: runData
         )
         let derived = SessionEnrichment.compute(input)
         if !store.save(derived) {
-            print("EnrichmentProvider: failed to save enriched measurement")
+            AppLogger.storage.error("EnrichmentProvider: failed to save enriched measurement")
         }
     }
 }

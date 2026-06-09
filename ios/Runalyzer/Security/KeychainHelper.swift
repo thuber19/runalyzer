@@ -34,6 +34,24 @@ enum Keychain {
         return result as? Data
     }
 
+    // MARK: - Database Encryption Key
+
+    private static let dbKeyAccount = "runalyzer_db_encryption_key"
+
+    /// Returns the database encryption key, generating a 256-bit random key on first call.
+    /// The key is stored in Keychain and persists across app reinstalls.
+    static func databaseKey() -> Data {
+        if let existing = load(key: dbKeyAccount) {
+            return existing
+        }
+        var keyData = Data(count: 32)
+        keyData.withUnsafeMutableBytes { buffer in
+            _ = SecRandomCopyBytes(kSecRandomDefault, 32, buffer.baseAddress!)
+        }
+        save(keyData, key: dbKeyAccount)
+        return keyData
+    }
+
     /// Delete a Keychain entry. No-op if the entry does not exist.
     @discardableResult
     static func delete(key: String) -> Bool {

@@ -45,23 +45,104 @@ final class AppDatabase {
         return dir
     }
 
-    /// Initialize with a specific path (for testing pass ":memory:" via `inMemory()`).
-    init(path: String) throws {
+    /// Initialize with a specific path and optional encryption passphrase.
+    /// For testing, pass ":memory:" via `inMemory()`.
+    /// The passphrase used as a hex string for consistency.
+    /// Using a String passphrase ensures PBKDF2 key derivation is always used,
+    /// avoiding mismatches between Data (raw key) and String (derived key) modes.
+    static func passphraseString(from data: Data) -> String {
+        data.map { String(format: "%02x", $0) }.joined()
+    }
+
+    init(path: String, passphrase: Data? = nil) throws {
         var config = Configuration()
         config.foreignKeysEnabled = true
+        if let passphrase {
+            let hexPassphrase = Self.passphraseString(from: passphrase)
+            config.prepareDatabase { db in
+                try db.usePassphrase(hexPassphrase)
+            }
+        }
         dbQueue = try DatabaseQueue(path: path, configuration: config)
         try migrator.migrate(dbQueue)
     }
 
-    /// Convenience: open the default on-disk database.
+    /// Convenience: open the default on-disk encrypted database.
+    /// On first launch after encryption is enabled, migrates any existing
+    /// unencrypted database to encrypted format.
     static func openDefault() throws -> AppDatabase {
-        let path = storageDir.appendingPathComponent("runalyzer.db").path
-        return try AppDatabase(path: path)
+        let dbURL = storageDir.appendingPathComponent("runalyzer.db")
+        let key = Keychain.databaseKey()
+
+        // If the DB file exists and is plaintext, encrypt it before opening.
+        if FileManager.default.fileExists(atPath: dbURL.path) && isUnencryptedDatabase(at: dbURL) {
+            AppLogger.storage.info("Plaintext DB detected — encrypting…")
+            do {
+                try encryptExistingDatabase(at: dbURL, passphrase: key)
+                AppLogger.storage.info("Database encryption migration succeeded")
+            } catch {
+                AppLogger.storage.error("Encryption migration failed: \(error.localizedDescription)")
+                // Preserve the unencrypted file and start fresh
+                let backupURL = dbURL.deletingLastPathComponent()
+                    .appendingPathComponent("runalyzer_pre_encrypt_\(Int(Date().timeIntervalSince1970)).db")
+                try? FileManager.default.moveItem(at: dbURL, to: backupURL)
+            }
+        }
+
+        return try AppDatabase(path: dbURL.path, passphrase: key)
     }
 
-    /// Convenience: in-memory database (for unit tests).
+    /// Check if a database file is unencrypted by reading its header.
+    /// SQLite files start with "SQLite format 3\0"; encrypted files do not.
+    private static func isUnencryptedDatabase(at url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { handle.closeFile() }
+        let header = handle.readData(ofLength: 16)
+        return header.starts(with: "SQLite format 3".data(using: .utf8)!)
+    }
+
+    /// Convenience: in-memory database (for unit tests, no encryption).
     static func inMemory() throws -> AppDatabase {
         try AppDatabase(path: ":memory:")
+    }
+
+    // MARK: - Encryption Migration
+
+    /// Encrypts an existing unencrypted database using SQLCipher's sqlcipher_export.
+    /// Follows the documented GRDB pattern: open plain DB, ATTACH encrypted, export, swap.
+    private static func encryptExistingDatabase(at dbURL: URL, passphrase: Data) throws {
+        let fm = FileManager.default
+        let encryptedURL = dbURL.deletingLastPathComponent()
+            .appendingPathComponent("runalyzer_encrypted.db")
+        // Clean up any leftover temp file from a failed previous attempt
+        try? fm.removeItem(at: encryptedURL)
+
+        // Open the existing unencrypted database (no passphrase = plaintext mode)
+        let plainDB = try DatabaseQueue(path: dbURL.path)
+
+        // Export from plain → encrypted using ATTACH + sqlcipher_export.
+        let hexPassphrase = passphraseString(from: passphrase)
+        try plainDB.inDatabase { db in
+            try db.execute(
+                sql: "ATTACH DATABASE ? AS encrypted KEY ?",
+                arguments: [encryptedURL.path, hexPassphrase])
+            try db.execute(sql: "SELECT sqlcipher_export('encrypted')")
+            try db.execute(sql: "DETACH DATABASE encrypted")
+        }
+
+        // Replace the unencrypted DB with the encrypted one
+        let backupURL = dbURL.deletingLastPathComponent()
+            .appendingPathComponent("runalyzer_pre_encrypt.db")
+        try? fm.removeItem(at: backupURL)
+        try fm.moveItem(at: dbURL, to: backupURL)
+        try fm.moveItem(at: encryptedURL, to: dbURL)
+
+        // Clean up WAL/SHM and backup
+        try? fm.removeItem(atPath: dbURL.path + "-wal")
+        try? fm.removeItem(atPath: dbURL.path + "-shm")
+        try? fm.removeItem(at: backupURL)
+
+        AppLogger.storage.info("Database encrypted successfully")
     }
 
     // MARK: - Schema Migrations
@@ -144,240 +225,21 @@ final class AppDatabase {
                           on: "workout_data_point", columns: ["workoutId"])
         }
 
+        migrator.registerMigration("v2-user-profile") { db in
+            try db.create(table: "user_profile") { t in
+                t.primaryKey("id", .integer)          // always 1 (singleton row)
+                t.column("heightCm", .double).notNull()
+                t.column("age", .integer).notNull()
+                t.column("sex", .text).notNull()
+                t.column("maxHROverride", .integer)
+                t.column("hrZone1Max", .integer)
+                t.column("hrZone2Max", .integer)
+                t.column("hrZone3Max", .integer)
+                t.column("hrZone4Max", .integer)
+            }
+        }
+
         return migrator
     }
 
-    // MARK: - JSON → SQLite Migration
-
-    /// Migrates existing measurements.json into the SQLite database.
-    /// Called once on first launch after the GRDB migration is deployed.
-    /// Splits .hkWorkout/.workout into the workout table, everything else into measurement.
-    private static let migrationOnce = NSLock()
-    private static var migrationDone = false
-
-    func migrateFromJSONIfNeeded() {
-        Self.migrationOnce.lock()
-        if Self.migrationDone { Self.migrationOnce.unlock(); return }
-        Self.migrationDone = true
-        Self.migrationOnce.unlock()
-
-        let jsonURL = Self.storageDir.appendingPathComponent("measurements.json")
-        guard FileManager.default.fileExists(atPath: jsonURL.path) else { return }
-
-        // Only migrate if the DB is empty
-        let isEmpty: Bool
-        do {
-            isEmpty = try dbQueue.read { db in
-                let mCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM measurement") ?? 0
-                let wCount = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM workout") ?? 0
-                return mCount == 0 && wCount == 0
-            }
-        } catch {
-            AppLogger.storage.error("Migration check failed: \(error.localizedDescription)")
-            return
-        }
-        guard isEmpty else { return }
-
-        // Decode the JSON
-        guard let data = try? Data(contentsOf: jsonURL) else {
-            AppLogger.storage.error("Cannot read measurements.json")
-            return
-        }
-        guard let measurements = try? JSONDecoder().decode([SensorMeasurement].self, from: data) else {
-            AppLogger.storage.error("Cannot decode measurements.json")
-            return
-        }
-
-        AppLogger.storage.info("Migrating \(measurements.count) measurements from JSON to SQLite…")
-
-        do {
-            try dbQueue.write { db in
-                for m in measurements {
-                    switch m.type {
-                    case .hkWorkout:
-                        try Self.migrateHKWorkout(m, db: db)
-                    case .workout:
-                        try Self.migrateIMUWorkout(m, db: db)
-                    case .metric, .derived, .bodyComp:
-                        try Self.migrateMeasurement(m, db: db)
-                    }
-                }
-            }
-            AppLogger.storage.info("Migration complete")
-
-            // Rename JSON as backup
-            let backup = Self.storageDir.appendingPathComponent(
-                "measurements_migrated_\(Int(Date().timeIntervalSince1970)).json")
-            try? FileManager.default.moveItem(at: jsonURL, to: backup)
-
-        } catch {
-            AppLogger.storage.error("Migration failed: \(error.localizedDescription)")
-        }
-    }
-
-    // MARK: - Migration Helpers
-
-    private static func migrateMeasurement(_ m: SensorMeasurement, db: Database) throws {
-        let rawFiles = (try? JSONEncoder().encode(m.rawDataFiles))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        let inputMeasurements = m.inputMeasurements.flatMap { ids -> String? in
-            let strs = ids.map { $0.uuidString }
-            return (try? JSONEncoder().encode(strs)).flatMap { String(data: $0, encoding: .utf8) }
-        }
-
-        try db.execute(sql: """
-            INSERT INTO measurement (id, date, type, rawDataFiles, inputMeasurements, modelVersion)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """, arguments: [
-                m.id.uuidString,
-                m.date.timeIntervalSince1970,
-                m.type.rawValue,
-                rawFiles,
-                inputMeasurements,
-                m.modelVersion
-            ])
-
-        for source in m.sources {
-            try db.execute(sql: """
-                INSERT INTO measurement_source (measurementId, deviceType, deviceName, serialNumber, algorithmName)
-                VALUES (?, ?, ?, ?, ?)
-                """, arguments: [
-                    m.id.uuidString,
-                    source.deviceType,
-                    source.deviceName,
-                    source.serialNumber,
-                    source.algorithmName
-                ])
-        }
-
-        for dp in m.dataPoints {
-            try db.execute(sql: """
-                INSERT INTO data_point (measurementId, timestamp, endTimestamp, type, value, unit, source, role)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, arguments: [
-                    m.id.uuidString,
-                    dp.timestamp.timeIntervalSince1970,
-                    dp.endTimestamp?.timeIntervalSince1970,
-                    dp.type,
-                    dp.value,
-                    dp.unit,
-                    dp.source,
-                    dp.role.rawValue
-                ])
-        }
-    }
-
-    private static func migrateHKWorkout(_ m: SensorMeasurement, db: Database) throws {
-        let dps = m.dataPoints
-        let workoutType = dps.first(where: { $0.type == DataType.workoutType })?.unit ?? "Workout"
-        let duration = dps.first(where: { $0.type == DataType.workoutDuration })?.value
-        let distance = dps.first(where: { $0.type == DataType.workoutDistance })?.value
-        let calories = dps.first(where: { $0.type == DataType.workoutCalories })?.value
-        let avgHR = dps.first(where: { $0.type == DataType.workoutAvgHR })?.value
-        let maxHR = dps.first(where: { $0.type == DataType.workoutMaxHR })?.value
-
-        // Extract HealthKit workout UUID from sources
-        let hkID = m.sources.first(where: { $0.serialNumber?.hasPrefix("hk:") == true })?
-            .serialNumber.flatMap { $0.hasPrefix("hk:") ? String($0.dropFirst(3)) : nil }
-
-        // Determine time range
-        let startDate = dps.first(where: { $0.type == DataType.workoutType })?.timestamp ?? m.date
-        let endDate = dps.first(where: { $0.type == DataType.workoutType })?.endTimestamp
-            ?? startDate.addingTimeInterval(duration ?? 0)
-
-        let source = dps.first?.source ?? m.sources.first?.deviceName ?? "unknown"
-
-        try db.execute(sql: """
-            INSERT INTO workout (id, startDate, endDate, activityType, source,
-                                 durationSec, distanceKm, calories, avgHR, maxHR, hkWorkoutId, rawDataFiles)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]')
-            """, arguments: [
-                m.id.uuidString,
-                startDate.timeIntervalSince1970,
-                endDate.timeIntervalSince1970,
-                workoutType,
-                source,
-                duration, distance, calories, avgHR, maxHR,
-                hkID
-            ])
-
-        // Store workout-level summary DataPoints (type, duration, distance, etc.)
-        // but NOT time-series HR/cadence/distance — those live in data_point via metric import
-        let summaryTypes: Set<String> = [
-            DataType.workoutType, DataType.workoutDuration, DataType.workoutDistance,
-            DataType.workoutCalories, DataType.workoutAvgHR, DataType.workoutMaxHR
-        ]
-        for dp in dps where summaryTypes.contains(dp.type) {
-            try db.execute(sql: """
-                INSERT INTO workout_data_point (workoutId, timestamp, type, value, unit, source, role)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, arguments: [
-                    m.id.uuidString,
-                    dp.timestamp.timeIntervalSince1970,
-                    dp.type, dp.value, dp.unit, dp.source, dp.role.rawValue
-                ])
-        }
-
-        // Time-series DataPoints (HR samples, cadence, distance during workout) → data_point table
-        // They need a measurement parent for the foreign key — create a synthetic metric measurement
-        // for the workout's time range so the data_point table can reference it.
-        let tsPoints = dps.filter { !summaryTypes.contains($0.type) }
-        if !tsPoints.isEmpty {
-            // Create a measurement to host these time-series points
-            let metricID = UUID()
-            try db.execute(sql: """
-                INSERT INTO measurement (id, date, type, rawDataFiles, modelVersion)
-                VALUES (?, ?, 'metric', '[]', 1)
-                """, arguments: [metricID.uuidString, startDate.timeIntervalSince1970])
-
-            for dp in tsPoints {
-                try db.execute(sql: """
-                    INSERT INTO data_point (measurementId, timestamp, endTimestamp, type, value, unit, source, role)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, arguments: [
-                        metricID.uuidString,
-                        dp.timestamp.timeIntervalSince1970,
-                        dp.endTimestamp?.timeIntervalSince1970,
-                        dp.type, dp.value, dp.unit, dp.source, dp.role.rawValue
-                    ])
-            }
-        }
-    }
-
-    private static func migrateIMUWorkout(_ m: SensorMeasurement, db: Database) throws {
-        let dps = m.dataPoints
-        let duration = dps.first(where: { $0.type == DataType.durationSec })?.value
-        let startDate = m.date
-        let endDate = startDate.addingTimeInterval(duration ?? 0)
-        let source = dps.first?.source ?? m.sources.first.map { DataSource.device($0.serialNumber ?? $0.deviceName) } ?? "unknown"
-
-        let rawFiles = (try? JSONEncoder().encode(m.rawDataFiles))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-
-        try db.execute(sql: """
-            INSERT INTO workout (id, startDate, endDate, activityType, source,
-                                 durationSec, rawDataFiles)
-            VALUES (?, ?, ?, 'IMU Recording', ?, ?, ?)
-            """, arguments: [
-                m.id.uuidString,
-                startDate.timeIntervalSince1970,
-                endDate.timeIntervalSince1970,
-                source,
-                duration,
-                rawFiles
-            ])
-
-        // All IMU DataPoints go to workout_data_point
-        for dp in dps {
-            try db.execute(sql: """
-                INSERT INTO workout_data_point (workoutId, timestamp, endTimestamp, type, value, unit, source, role)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, arguments: [
-                    m.id.uuidString,
-                    dp.timestamp.timeIntervalSince1970,
-                    dp.endTimestamp?.timeIntervalSince1970,
-                    dp.type, dp.value, dp.unit, dp.source, dp.role.rawValue
-                ])
-        }
-    }
 }

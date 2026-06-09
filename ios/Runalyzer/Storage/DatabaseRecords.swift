@@ -215,3 +215,42 @@ struct WorkoutDataPointRecord: Codable, FetchableRecord, PersistableRecord {
     }
 }
 
+// MARK: - User Profile Record
+
+struct UserProfileRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "user_profile"
+
+    var id: Int = 1  // singleton
+    var heightCm: Double
+    var age: Int
+    var sex: String
+    var maxHROverride: Int?
+    var hrZone1Max: Int?
+    var hrZone2Max: Int?
+    var hrZone3Max: Int?
+    var hrZone4Max: Int?
+
+    init(from model: UserProfile) {
+        self.heightCm = model.heightCm
+        self.age = model.age
+        self.sex = model.sex.rawValue
+        self.maxHROverride = model.maxHROverride
+        self.hrZone1Max = model.hrZone1Max
+        self.hrZone2Max = model.hrZone2Max
+        self.hrZone3Max = model.hrZone3Max
+        self.hrZone4Max = model.hrZone4Max
+    }
+
+    func toModel() -> UserProfile {
+        UserProfile(
+            heightCm: heightCm,
+            age: age,
+            sex: UserProfile.Sex(rawValue: sex) ?? .male,
+            hrZone1Max: hrZone1Max,
+            hrZone2Max: hrZone2Max,
+            hrZone3Max: hrZone3Max,
+            hrZone4Max: hrZone4Max,
+            maxHROverride: maxHROverride
+        )
+    }
+}

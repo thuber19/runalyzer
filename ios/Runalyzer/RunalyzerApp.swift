@@ -14,16 +14,12 @@ struct RunalyzerApp: App {
     @StateObject private var appWiring = AppWiring()
     @StateObject private var sourcePrefs = SourcePreferenceStore()
 
-    // Legacy — kept for existing session detail views that still reference SessionStore
-    @StateObject private var sessions = SessionStore()
-
     @State private var databaseFailed = false
 
     init() {
         // Initialize database before stores
         do {
             AppDatabase.shared = try AppDatabase.openDefault()
-            AppDatabase.shared.migrateFromJSONIfNeeded()
         } catch {
             // Fall back to in-memory database so the app can still launch
             AppLogger.storage.error("Failed to open database: \(error.localizedDescription). Falling back to in-memory DB.")
@@ -41,7 +37,6 @@ struct RunalyzerApp: App {
                 .environmentObject(metrics)
                 .environmentObject(store)
                 .environmentObject(healthKit)
-                .environmentObject(sessions)
                 .environmentObject(appWiring)
                 .environmentObject(sourcePrefs)
                 .environmentObject(workoutStore)
@@ -49,17 +44,12 @@ struct RunalyzerApp: App {
                     healthKit.requestAuthorization()
                     appWiring.setup(coordinator: coordinator, metrics: metrics,
                                    store: store, workoutStore: workoutStore,
-                                   healthKit: healthKit, sessions: sessions)
+                                   healthKit: healthKit)
                 }
                 .alert("Database Error", isPresented: $databaseFailed) {
                     Button("OK", role: .cancel) {}
                 } message: {
                     Text("The database could not be opened. Running with a temporary in-memory database — your data will not be saved until the issue is resolved. Try restarting the app.")
-                }
-                .alert("Data Recovery", isPresented: $sessions.corruptDataDetected) {
-                    Button("OK", role: .cancel) {}
-                } message: {
-                    Text("Your session history could not be read and has been backed up. A fresh start has been created. If this keeps happening, please contact support.")
                 }
         }
     }
@@ -80,7 +70,7 @@ class AppWiring: ObservableObject {
 
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, workoutStore: WorkoutStore,
-               healthKit: HealthKitManager, sessions: SessionStore) {
+               healthKit: HealthKitManager) {
 
         // Clear previous subscriptions (prevents duplicates if setup called multiple times)
         cancellables.removeAll()
@@ -92,7 +82,7 @@ class AppWiring: ObservableObject {
 
         // Create providers
         scaleProvider = ScaleMeasurementProvider(measurementStore: store)
-        imuProvider = IMUMeasurementProvider(workoutStore: workoutStore, sessionStore: sessions)
+        imuProvider = IMUMeasurementProvider(workoutStore: workoutStore)
         metricProvider = HealthKitMetricProvider(healthKit: healthKit, store: store,
                                                 workoutStore: workoutStore, metricIndex: metricIndex)
         recoveryProvider = RecoveryMeasurementProvider(metricIndex: metricIndex, measurementStore: store)
@@ -169,7 +159,7 @@ class AppWiring: ObservableObject {
             }
             imu.onDownloadComplete = { [weak imuProvider, weak imu] samples, status, events in
                 guard let imu else { return }
-                // Provider handles: analysis → measurement + legacy session → save → erase
+                // Provider handles: analysis → workout + data points → save → erase
                 imuProvider?.handleDownloadComplete(
                     samples: samples,
                     sampleRateHz: Int(status.sampleRateHz),

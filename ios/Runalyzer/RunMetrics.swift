@@ -1,7 +1,6 @@
 import Foundation
 import Combine
 
-@MainActor
 class RunMetrics: ObservableObject {
     // Published metrics
     @Published var cadence: Int = 0

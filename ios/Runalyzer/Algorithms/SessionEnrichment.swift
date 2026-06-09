@@ -1,11 +1,11 @@
 import Foundation
 
-/// Combines an IMU session with a linked Apple Watch workout into a single `.derived`
+/// Combines an IMU workout with a linked Apple Watch workout into a single `.derived`
 /// SensorMeasurement.  This is the foundation for future cross-sensor algorithms.
 ///
-/// Inputs  — stay in their original stores (SessionStore / HealthKit); not duplicated.
+/// Inputs  — stay in their original stores (WorkoutStore / HealthKit); not duplicated.
 /// Outputs — key summary metrics + derived values stored as DataPoints.
-/// Provenance — inputMeasurements links back to the source IMU SensorMeasurement if known.
+/// Provenance — inputMeasurements links back to the source IMU workout if known.
 enum SessionEnrichment {
 
     static let algorithmID = "session_enrichment_v1"
@@ -13,39 +13,27 @@ enum SessionEnrichment {
     // MARK: - Compute
 
     struct Input {
-        let session: RunSession
-        let workout: AppleWorkout
+        let imuWorkout: Workout
+        let appleWorkout: AppleWorkout
         let runData: AppleRunData
-        /// ID of the SensorMeasurement for the IMU session (found by date match in MeasurementStore).
-        let imuMeasurementID: UUID?
     }
 
     /// Builds the derived SensorMeasurement. Does NOT save it — caller decides when to persist.
     static func compute(_ input: Input) -> SensorMeasurement {
-        let date        = input.session.date
-        let durationSec = input.session.duration
+        let date        = input.imuWorkout.startDate
+        let durationSec = input.imuWorkout.durationSec ?? 0
         let distanceKm  = input.runData.distanceKm
         var dp: [DataPoint] = []
 
-        // MARK: IMU metrics (source: the session itself)
-        let imuSrc = DataSource.device(input.session.id.uuidString)
-        dp.append(DataPoint(timestamp: date, endTimestamp: nil,
-                            type: DataType.avgCadence,
-                            value: Double(input.session.avgCadence),
-                            unit: "spm", source: imuSrc, role: .primary))
-        if let steps = input.session.totalSteps, steps > 0 {
-            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
-                                type: DataType.totalSteps,
-                                value: Double(steps),
-                                unit: "steps", source: imuSrc, role: .detail))
-        }
+        // MARK: IMU metrics (source: the workout itself)
+        let imuSrc = DataSource.device(input.imuWorkout.id.uuidString)
         dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                             type: DataType.durationSec,
                             value: durationSec,
                             unit: "s", source: imuSrc, role: .detail))
 
         // MARK: Apple Watch metrics (source: HK workout UUID)
-        let hkSrc = DataSource.healthKit(input.workout.id)
+        let hkSrc = DataSource.healthKit(input.appleWorkout.id)
         if input.runData.avgHeartRate > 0 {
             dp.append(DataPoint(timestamp: date, endTimestamp: nil,
                                 type: DataType.heartRate,
@@ -77,15 +65,6 @@ enum SessionEnrichment {
                                 unit: "min/km", source: derivedSrc, role: .primary))
         }
 
-        // Step length (m/step) from Watch distance + IMU step count
-        if distanceKm > 0, let steps = input.session.totalSteps, steps > 0 {
-            let stepLengthM = (distanceKm * 1000.0) / Double(steps)
-            dp.append(DataPoint(timestamp: date, endTimestamp: nil,
-                                type: DataType.stepLength,
-                                value: stepLengthM,
-                                unit: "m", source: derivedSrc, role: .detail))
-        }
-
         // Running economy proxy: beats/km = avgHR × pace (min/km)
         if input.runData.avgHeartRate > 0 && distanceKm > 0 && durationSec > 0 {
             let pace = (durationSec / 60.0) / distanceKm
@@ -108,12 +87,10 @@ enum SessionEnrichment {
         // MARK: Sources list
         let sources: [MeasurementSource] = [
             .device(type: "imu_sensor", name: "Runalyzer IMU",
-                    serial: input.session.id.uuidString),
-            .healthKit(workoutID: input.workout.id, name: input.workout.activityName),
+                    serial: input.imuWorkout.id.uuidString),
+            .healthKit(workoutID: input.appleWorkout.id, name: input.appleWorkout.activityName),
             .algorithm(name: algorithmID),
         ]
-
-        let inputIDs: [UUID]? = input.imuMeasurementID.map { [$0] }
 
         return SensorMeasurement(
             id: UUID(),
@@ -122,19 +99,7 @@ enum SessionEnrichment {
             sources: sources,
             dataPoints: dp,
             rawDataFiles: [],
-            inputMeasurements: inputIDs
+            inputMeasurements: [input.imuWorkout.id]
         )
-    }
-
-    // MARK: - Convenience: find IMU workout by date
-
-    /// Looks up the Workout in the store whose date is within 30s of the session date.
-    /// Used to populate `inputMeasurements` provenance on the derived record.
-    static func findIMUWorkout(for session: RunSession,
-                               in workoutStore: WorkoutStore) -> UUID? {
-        workoutStore.workouts
-            .filter { $0.activityType == "IMU Recording" }
-            .first { abs($0.startDate.timeIntervalSince(session.date)) < 30 }?
-            .id
     }
 }

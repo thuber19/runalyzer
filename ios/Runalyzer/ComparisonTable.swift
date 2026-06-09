@@ -246,15 +246,15 @@ struct IMUDetailView: View {
 
 extension ComparisonTableView {
     static func build(
-        session: RunSession,
+        workout: Workout,
         analysis: RecordingAnalysis?,
         samples: [RecordedSample],
         appleData: AppleRunData?
     ) -> ComparisonTableView {
         let windowSec: Double = 10
-        let duration = session.duration
+        let duration = workout.durationSec ?? 0
         let windowCount = max(1, Int(ceil(duration / windowSec)))
-        let sessionStart = session.date
+        let sessionStart = workout.startDate
 
         var rows: [ComparisonRow] = []
 

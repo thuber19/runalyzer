@@ -1,4 +1,6 @@
 import Foundation
+import GRDB
+import os
 
 /// User profile needed for body composition calculations.
 struct UserProfile: Codable, Equatable {
@@ -61,28 +63,30 @@ struct UserProfile: Codable, Equatable {
         ]
     }
 
-    private static let keychainKey = "user_profile"
-    private static let legacyDefaultsKey = "runalyzer_user_profile"  // migration only
+    // MARK: - Persistence (backed by encrypted GRDB database)
 
     func save() {
-        if let data = try? JSONEncoder().encode(self) {
-            Keychain.save(data, key: Self.keychainKey)
+        guard let db = AppDatabase.sharedIfReady else { return }
+        do {
+            try db.dbQueue.write { database in
+                let record = UserProfileRecord(from: self)
+                try record.save(database)
+            }
+        } catch {
+            AppLogger.storage.error("Failed to save UserProfile: \(error.localizedDescription)")
         }
     }
 
     static func load() -> UserProfile {
-        // One-time migration from UserDefaults → Keychain
-        if Keychain.load(key: keychainKey) == nil,
-           let legacyData = UserDefaults.standard.data(forKey: legacyDefaultsKey) {
-            Keychain.save(legacyData, key: keychainKey)
-            UserDefaults.standard.removeObject(forKey: legacyDefaultsKey)
+        guard let db = AppDatabase.sharedIfReady else { return .default }
+        do {
+            if let record = try db.dbQueue.read({ try UserProfileRecord.fetchOne($0, key: 1) }) {
+                return record.toModel()
+            }
+        } catch {
+            AppLogger.storage.error("Failed to load UserProfile from DB: \(error.localizedDescription)")
         }
-
-        guard let data = Keychain.load(key: keychainKey),
-              let profile = try? JSONDecoder().decode(UserProfile.self, from: data) else {
-            return .default
-        }
-        return profile
+        return .default
     }
 }
 

@@ -1,15 +1,14 @@
 import Foundation
+import os
 
 /// Self-contained provider for IMU workout recordings.
 /// Trigger: IMU download completes.
 /// Pipeline: raw samples → step detection (RunMetrics) → Workout + raw data → WorkoutStore.
 class IMUMeasurementProvider {
     private weak var workoutStore: WorkoutStore?
-    private weak var sessionStore: SessionStore?  // legacy — kept until session detail views migrate
 
-    init(workoutStore: WorkoutStore, sessionStore: SessionStore? = nil) {
+    init(workoutStore: WorkoutStore) {
         self.workoutStore = workoutStore
-        self.sessionStore = sessionStore
     }
 
     /// Called when IMU download completes. Runs analysis on background thread,
@@ -58,7 +57,7 @@ class IMUMeasurementProvider {
             }
 
             guard let rawData = try? JSONEncoder().encode(samples) else {
-                print("Failed to encode IMU raw data")
+                AppLogger.storage.error("Failed to encode IMU raw data")
                 return
             }
 
@@ -72,19 +71,6 @@ class IMUMeasurementProvider {
                 rawDataFiles: [rawFileName]
             )
 
-            // Build legacy RunSession (reuses analysis — no duplicate computation)
-            let legacySession = RunSession(
-                id: UUID(),
-                date: startDate,
-                endDate: endDate,
-                duration: durationSec,
-                sampleCount: samples.count,
-                avgCadence: Int(analysis.avgCadence),
-                totalSteps: analysis.totalSteps,
-                events: events,
-                samplesFileName: rawFileName
-            )
-
             DispatchQueue.main.async { [weak self] in
                 // Write raw data file
                 let storageDir = AppDatabase.storageDir
@@ -93,19 +79,16 @@ class IMUMeasurementProvider {
                     try rawData.write(to: rawURL,
                                       options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
                 } catch {
-                    print("Failed to write IMU raw data: \(error)")
+                    AppLogger.storage.error("Failed to write IMU raw data: \(error.localizedDescription)")
                     return
                 }
 
                 // Save to WorkoutStore
                 let saved = self?.workoutStore?.save(workout, dataPoints: dp) ?? false
                 guard saved else {
-                    print("IMU workout save failed — keeping device data")
+                    AppLogger.storage.error("IMU workout save failed — keeping device data")
                     return
                 }
-
-                // Save to legacy SessionStore
-                self?.sessionStore?.saveLegacySession(legacySession, rawSamples: samples)
 
                 // Only erase device data after successful save
                 driver.eraseData()
