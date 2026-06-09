@@ -1,19 +1,19 @@
 import Foundation
 
-/// Self-contained provider for IMU workout measurements.
+/// Self-contained provider for IMU workout recordings.
 /// Trigger: IMU download completes.
-/// Pipeline: raw samples → step detection (RunMetrics) → measurement + raw data → store.
+/// Pipeline: raw samples → step detection (RunMetrics) → Workout + raw data → WorkoutStore.
 class IMUMeasurementProvider {
-    private weak var measurementStore: MeasurementStore?
+    private weak var workoutStore: WorkoutStore?
     private weak var sessionStore: SessionStore?  // legacy — kept until session detail views migrate
 
-    init(measurementStore: MeasurementStore, sessionStore: SessionStore? = nil) {
-        self.measurementStore = measurementStore
+    init(workoutStore: WorkoutStore, sessionStore: SessionStore? = nil) {
+        self.workoutStore = workoutStore
         self.sessionStore = sessionStore
     }
 
     /// Called when IMU download completes. Runs analysis on background thread,
-    /// saves measurement on main thread, then erases device data on success.
+    /// saves workout on main thread, then erases device data on success.
     func handleDownloadComplete(
         samples: [RecordedSample],
         sampleRateHz: Int,
@@ -24,16 +24,10 @@ class IMUMeasurementProvider {
     ) {
         guard !samples.isEmpty else { return }
 
-        let source = MeasurementSource.device(
-            type: "imu_sensor",
-            name: driver.displayName,
-            serial: driver.id.uuidString
-        )
-        let deviceSrc = DataSource.device(source.serialNumber ?? source.deviceName)
+        let deviceSrc = DataSource.device(driver.id.uuidString)
         let rawFileName = "imu_\(UUID().uuidString.prefix(8)).json"
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            // Analysis runs ONCE — results shared between MeasurementStore and legacy SessionStore
             let analysis = RunMetrics.analyzeRecording(samples)
 
             let startDate: Date
@@ -42,8 +36,9 @@ class IMUMeasurementProvider {
             } else {
                 startDate = Date().addingTimeInterval(-durationSec)
             }
+            let endDate = startDate.addingTimeInterval(durationSec)
 
-            // Build SensorMeasurement for MeasurementStore
+            // Build workout-specific DataPoints (stored in workout_data_point table)
             var dp: [DataPoint] = [
                 DataPoint(timestamp: startDate, endTimestamp: nil, type: DataType.durationSec,
                           value: durationSec, unit: "s", source: deviceSrc, role: .primary),
@@ -67,14 +62,17 @@ class IMUMeasurementProvider {
                 return
             }
 
-            let measurement = SensorMeasurement(
-                id: UUID(), date: startDate, type: .workout,
-                sources: [source],
-                dataPoints: dp, rawDataFiles: [rawFileName]
+            let workout = Workout(
+                id: UUID(),
+                startDate: startDate,
+                endDate: endDate,
+                activityType: "IMU Recording",
+                source: deviceSrc,
+                durationSec: durationSec,
+                rawDataFiles: [rawFileName]
             )
 
             // Build legacy RunSession (reuses analysis — no duplicate computation)
-            let endDate = startDate.addingTimeInterval(durationSec)
             let legacySession = RunSession(
                 id: UUID(),
                 date: startDate,
@@ -88,15 +86,25 @@ class IMUMeasurementProvider {
             )
 
             DispatchQueue.main.async { [weak self] in
-                // Save to MeasurementStore (new path)
-                let saved = self?.measurementStore?.save(measurement,
-                    rawData: [(filename: rawFileName, data: rawData)]) ?? false
-                guard saved else {
-                    print("IMU measurement save failed — keeping device data")
+                // Write raw data file
+                let storageDir = AppDatabase.storageDir
+                let rawURL = storageDir.appendingPathComponent(rawFileName)
+                do {
+                    try rawData.write(to: rawURL,
+                                      options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+                } catch {
+                    print("Failed to write IMU raw data: \(error)")
                     return
                 }
 
-                // Save to legacy SessionStore (uses pre-computed analysis)
+                // Save to WorkoutStore
+                let saved = self?.workoutStore?.save(workout, dataPoints: dp) ?? false
+                guard saved else {
+                    print("IMU workout save failed — keeping device data")
+                    return
+                }
+
+                // Save to legacy SessionStore
                 self?.sessionStore?.saveLegacySession(legacySession, rawSamples: samples)
 
                 // Only erase device data after successful save

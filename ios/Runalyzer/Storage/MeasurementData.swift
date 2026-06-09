@@ -91,8 +91,20 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
 
     var modelVersion: Int = Self.currentVersion
 
-    // Convenience
+    /// Display name for the measurement type (used in list rows when DataPoints aren't loaded).
+    var typeName: String {
+        switch type {
+        case .bodyComp:  return "Body Composition"
+        case .derived:   return "Derived"
+        case .metric:    return "Metric"
+        case .workout:   return "IMU Recording"
+        case .hkWorkout: return "Workout"
+        }
+    }
+
+    // Convenience — when DataPoints are empty (lightweight DB headers), returns type name
     var summary: String {
+        if dataPoints.isEmpty { return typeName }
         switch type {
         case .workout:
             let duration = dataPoints.first(where: { $0.type == "duration_sec" })?.value ?? 0
@@ -301,6 +313,7 @@ enum DataType {
     static let distance = "distance"
     static let activeCalories = "active_calories"
     static let pace = "pace"
+    static let runningSpeed = "running_speed"       // m/s — Apple's pre-calculated GPS+sensor speed
 
     // Derived — running
     static let stepLength = "step_length"         // m/step

@@ -9,25 +9,20 @@ struct IntradayView: View {
     let color: Color
     let date: Date
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var sourcePrefs: SourcePreferenceStore
 
-    private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
-
-    private var points: [DataPoint] {
-        // Use the specific measurement for this day (not a broad MetricIndex query)
-        // This avoids picking up DataPoints from adjacent days with matching timestamps
-        if let measurement = metricIndex.metricMeasurement(forDay: date, containingType: metricType) {
-            return measurement.dataPoints.filter { $0.type == metricType }
-                .sorted { $0.timestamp < $1.timestamp }
-        }
-        // Fallback: broad query
-        let cal = Calendar.current
-        let dayStart = cal.startOfDay(for: date)
-        guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
-        return metricIndex.query(type: metricType, measurementType: .metric, from: dayStart, to: dayEnd)
-    }
+    @State private var points: [DataPoint] = []
+    @State private var isLoaded = false
 
     private var stats: MetricAggregator.PeriodStats {
         MetricAggregator.periodStats(points)
+    }
+
+    /// Downsample for chart rendering — max ~200 points for smooth performance.
+    private var chartPoints: [DataPoint] {
+        guard points.count > 200 else { return points }
+        let step = points.count / 200
+        return stride(from: 0, to: points.count, by: step).map { points[$0] }
     }
 
     private static let timeFmt: DateFormatter = {
@@ -39,50 +34,59 @@ struct IntradayView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // Intraday chart
-                if points.count > 1 {
-                    intradayChart
-                        .frame(height: 200)
-                        .padding(.horizontal)
-                }
+                if !isLoaded {
+                    ProgressView("Loading…").padding(.top, 40)
+                } else {
+                    // Chart (downsampled)
+                    if chartPoints.count > 1 {
+                        intradayChart
+                            .frame(height: 200)
+                            .padding(.horizontal)
+                    }
 
-                // Stats
-                HStack(spacing: 0) {
-                    statCol("Avg", String(format: "%.1f", stats.avg))
-                    statCol("Min", String(format: "%.1f", stats.min))
-                    statCol("Max", String(format: "%.1f", stats.max))
-                    statCol("Count", "\(points.count)")
-                }
-                .padding()
-                .background(Color(hex: 0x16213e))
-                .cornerRadius(12)
-                .padding(.horizontal)
+                    // Stats
+                    HStack(spacing: 0) {
+                        statCol("Avg", String(format: "%.1f", stats.avg))
+                        statCol("Min", String(format: "%.1f", stats.min))
+                        statCol("Max", String(format: "%.1f", stats.max))
+                        statCol("Count", "\(points.count)")
+                    }
+                    .padding()
+                    .background(Color.appSurface)
+                    .cornerRadius(12)
+                    .padding(.horizontal)
 
-                // Reading list
-                readingList
+                    // Reading list (lazy — only renders visible rows)
+                    readingList
+                }
             }
             .padding(.vertical)
         }
-        .background(Color(hex: 0x1a1a2e))
+        .background(Color.appBackground)
         .navigationTitle(MetricAggregator.formatDay(date))
+        .onAppear { loadPoints() }
+    }
+
+    private func loadPoints() {
+        guard !isLoaded else { return }
+        let cal = Calendar.current
+        let dayStart = cal.startOfDay(for: date)
+        guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return }
+        let metricIndex = MetricIndex(store: measurementStore)
+        let raw = metricIndex.query(type: metricType, measurementType: .metric,
+                                    from: dayStart, to: dayEnd, filter: sourcePrefs)
+        points = raw
+        isLoaded = true
     }
 
     private var intradayChart: some View {
         Chart {
-            ForEach(Array(points.enumerated()), id: \.offset) { _, p in
+            ForEach(Array(chartPoints.enumerated()), id: \.offset) { _, p in
                 LineMark(
                     x: .value("Time", p.timestamp),
                     y: .value(title, p.value)
                 )
                 .foregroundStyle(color)
-            }
-            ForEach(Array(points.enumerated()), id: \.offset) { _, p in
-                PointMark(
-                    x: .value("Time", p.timestamp),
-                    y: .value(title, p.value)
-                )
-                .foregroundStyle(color)
-                .symbolSize(points.count < 30 ? 20 : 0)
             }
         }
         .chartXAxis {
@@ -111,22 +115,24 @@ struct IntradayView: View {
 
     private var readingList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("READINGS").font(.caption2).foregroundColor(.gray)
+            Text("READINGS (\(points.count))").font(.caption2).foregroundColor(.gray)
                 .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
 
-            ForEach(Array(points.enumerated()), id: \.offset) { _, p in
-                HStack {
-                    Text(Self.timeFmt.string(from: p.timestamp))
-                        .font(.system(size: 13, design: .monospaced)).foregroundColor(.gray)
-                    Spacer()
-                    Text(String(format: "%.2f", p.value))
-                        .font(.system(size: 13, design: .monospaced))
-                    Text(unit).font(.caption2).foregroundColor(.gray)
+            LazyVStack(spacing: 0) {
+                ForEach(Array(points.enumerated()), id: \.offset) { _, p in
+                    HStack {
+                        Text(Self.timeFmt.string(from: p.timestamp))
+                            .font(.system(size: 13, design: .monospaced)).foregroundColor(.gray)
+                        Spacer()
+                        Text(String(format: "%.2f", p.value))
+                            .font(.system(size: 13, design: .monospaced))
+                        Text(unit).font(.caption2).foregroundColor(.gray)
+                    }
+                    .padding(.horizontal).padding(.vertical, 6)
                 }
-                .padding(.horizontal).padding(.vertical, 6)
             }
         }
-        .background(Color(hex: 0x16213e))
+        .background(Color.appSurface)
         .cornerRadius(12)
         .padding(.horizontal)
     }

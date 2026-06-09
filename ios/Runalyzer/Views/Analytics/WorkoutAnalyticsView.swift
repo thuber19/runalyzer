@@ -3,30 +3,30 @@ import Charts
 
 /// Workout analytics: HR zones across workouts, distance by type, duration trends.
 struct WorkoutAnalyticsView: View {
-    @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var workoutStore: WorkoutStore
     @State private var timeRange: MetricTrendView.TimeRange = .month
     @State private var activityFilter: String = "All"
 
     private let cal = Calendar.current
 
-    private var workouts: [SensorMeasurement] {
+    /// Activity types where accumulated distance is meaningful.
+    private static let distanceActivityTypes: Set<String> = [
+        "Run", "Walk", "Cycle", "Hike", "Swim", "Rowing",
+        "Elliptical", "Skating", "Cross Training", "HIIT"
+    ]
+
+    private var workouts: [Workout] {
         guard let start = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) else { return [] }
-        return measurementStore.measurements
-            .filter { $0.type == .hkWorkout && $0.date >= start }
-            .sorted { $0.date < $1.date }
+        return workoutStore.workouts(from: start, to: Date()).sorted { $0.startDate < $1.startDate }
     }
 
-    private var filteredWorkouts: [SensorMeasurement] {
+    private var filteredWorkouts: [Workout] {
         if activityFilter == "All" { return workouts }
-        return workouts.filter { m in
-            m.dataPoints.first(where: { $0.type == DataType.workoutType })?.unit == activityFilter
-        }
+        return workouts.filter { $0.activityType == activityFilter }
     }
 
     private var activityTypes: [String] {
-        let types = Set(workouts.compactMap { m in
-            m.dataPoints.first(where: { $0.type == DataType.workoutType })?.unit
-        })
+        let types = Set(workouts.map(\.activityType))
         return ["All"] + types.sorted()
     }
 
@@ -67,9 +67,15 @@ struct WorkoutAnalyticsView: View {
                 hrZoneChart
                     .padding(.horizontal)
 
-                // Distance by activity type
+                // Distance by activity type (only distance-relevant activities)
                 if activityFilter == "All" {
                     distanceByType
+                        .padding(.horizontal)
+                }
+
+                // Time by activity type
+                if activityFilter == "All" {
+                    timeByActivity
                         .padding(.horizontal)
                 }
 
@@ -89,16 +95,10 @@ struct WorkoutAnalyticsView: View {
     // MARK: - Summary Stats
 
     private var summaryStats: some View {
-        let totalMin = filteredWorkouts.compactMap { m in
-            m.dataPoints.first(where: { $0.type == DataType.workoutDuration })?.value
-        }.reduce(0, +) / 60
-        let totalDist = filteredWorkouts.compactMap { m in
-            m.dataPoints.first(where: { $0.type == DataType.workoutDistance })?.value
-        }.reduce(0, +)
-        let avgHR = filteredWorkouts.compactMap { m in
-            m.dataPoints.first(where: { $0.type == DataType.workoutAvgHR })?.value
-        }
-        let meanHR = avgHR.isEmpty ? 0 : avgHR.reduce(0, +) / Double(avgHR.count)
+        let totalMin = filteredWorkouts.compactMap(\.durationSec).reduce(0, +) / 60
+        let totalDist = filteredWorkouts.compactMap(\.distanceKm).reduce(0, +)
+        let avgHRs = filteredWorkouts.compactMap(\.avgHR)
+        let meanHR = avgHRs.isEmpty ? 0 : avgHRs.reduce(0, +) / Double(avgHRs.count)
 
         return HStack(spacing: 0) {
             statCol("\(filteredWorkouts.count)", "Workouts")
@@ -118,9 +118,9 @@ struct WorkoutAnalyticsView: View {
         let zones = profile.hrZones
         let colors: [Color] = [.gray, .blue, .green, .orange, .red]
 
-        // Aggregate HR samples across all filtered workouts
-        let allHR = filteredWorkouts.flatMap { m in
-            m.dataPoints.filter { $0.type == DataType.heartRateSample }
+        // Aggregate HR samples across all filtered workouts via time-window queries
+        let allHR = filteredWorkouts.flatMap { w in
+            workoutStore.sharedDataPoints(for: w, type: DataType.heartRateSample)
         }
         let sortedHR = allHR.sorted { $0.timestamp < $1.timestamp }
 
@@ -173,16 +173,17 @@ struct WorkoutAnalyticsView: View {
 
     private var distanceByType: some View {
         var byType: [(type: String, distance: Double)] = []
-        let types = Set(workouts.compactMap { m in
-            m.dataPoints.first(where: { $0.type == DataType.workoutType })?.unit
-        })
+        let types = Set(workouts.map(\.activityType))
+            .filter { Self.distanceActivityTypes.contains($0) }
+
         for type in types.sorted() {
             let dist = workouts
-                .filter { m in m.dataPoints.first(where: { $0.type == DataType.workoutType })?.unit == type }
-                .compactMap { m in m.dataPoints.first(where: { $0.type == DataType.workoutDistance })?.value }
+                .filter { $0.activityType == type }
+                .compactMap(\.distanceKm)
                 .reduce(0, +)
             if dist > 0.1 { byType.append((type: type, distance: dist)) }
         }
+        byType.sort { $0.distance > $1.distance }
 
         return VStack(alignment: .leading, spacing: 4) {
             if !byType.isEmpty {
@@ -204,15 +205,46 @@ struct WorkoutAnalyticsView: View {
         .cornerRadius(12)
     }
 
+    // MARK: - Time by Activity Type
+
+    private var timeByActivity: some View {
+        var byType: [(type: String, seconds: Double)] = []
+        var totals: [String: Double] = [:]
+        for w in workouts {
+            totals[w.activityType, default: 0] += w.durationSec ?? 0
+        }
+        byType = totals.map { (type: $0.key, seconds: $0.value) }
+            .filter { $0.seconds > 0 }
+            .sorted { $0.seconds > $1.seconds }
+
+        return VStack(alignment: .leading, spacing: 4) {
+            if !byType.isEmpty {
+                Text("TIME BY ACTIVITY").font(.caption2).foregroundColor(.gray)
+                Chart(byType, id: \.type) { item in
+                    BarMark(x: .value("min", item.seconds / 60), y: .value("Type", item.type))
+                        .foregroundStyle(Color(hex: 0x5dadec))
+                        .annotation(position: .trailing) {
+                            Text(formatHHMM(item.seconds))
+                                .font(.caption2).foregroundColor(.gray)
+                        }
+                }
+                .chartXAxis(.hidden)
+                .frame(height: CGFloat(byType.count) * 35)
+            }
+        }
+        .padding()
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
+    }
+
     // MARK: - Duration Trend (weekly)
 
     private var durationTrend: some View {
         var byWeek: [Date: Double] = [:]
-        for m in filteredWorkouts {
-            let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: m.date)
+        for w in filteredWorkouts {
+            let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: w.startDate)
             if let weekStart = cal.date(from: comps) {
-                let dur = m.dataPoints.first(where: { $0.type == DataType.workoutDuration })?.value ?? 0
-                byWeek[weekStart, default: 0] += dur / 60
+                byWeek[weekStart, default: 0] += (w.durationSec ?? 0) / 60
             }
         }
         let weeks = byWeek.keys.sorted().map { (date: $0, minutes: byWeek[$0] ?? 0) }
@@ -240,23 +272,15 @@ struct WorkoutAnalyticsView: View {
             Text("WORKOUTS").font(.caption2).foregroundColor(.gray)
                 .padding(.horizontal).padding(.top, 12).padding(.bottom, 4)
 
-            ForEach(filteredWorkouts.reversed()) { m in
-                NavigationLink(destination: MeasurementDetailView(measurement: m)) {
-                    let type = m.dataPoints.first(where: { $0.type == DataType.workoutType })?.unit ?? "Workout"
-                    let dur = m.dataPoints.first(where: { $0.type == DataType.workoutDuration })?.value ?? 0
-                    let hr = m.dataPoints.first(where: { $0.type == DataType.workoutAvgHR })?.value
-
-                    HStack {
-                        Text(type).font(.subheadline).frame(width: 70, alignment: .leading)
-                        Text(formatDuration(dur)).font(.caption.monospacedDigit())
-                        if let hr { Text(String(format: "%.0f bpm", hr)).font(.caption2).foregroundColor(.gray) }
-                        Spacer()
-                        Text(MetricAggregator.formatDay(m.date)).font(.caption2).foregroundColor(.gray)
-                        Image(systemName: "chevron.right").font(.caption2).foregroundColor(.gray.opacity(0.5))
-                    }
-                    .padding(.horizontal).padding(.vertical, 8)
+            ForEach(filteredWorkouts.reversed()) { w in
+                HStack {
+                    Text(w.activityType).font(.subheadline).frame(width: 70, alignment: .leading)
+                    Text(w.durationString).font(.caption.monospacedDigit())
+                    if let hr = w.avgHR { Text(String(format: "%.0f bpm", hr)).font(.caption2).foregroundColor(.gray) }
+                    Spacer()
+                    Text(MetricAggregator.formatDay(w.startDate)).font(.caption2).foregroundColor(.gray)
                 }
-                .buttonStyle(.plain)
+                .padding(.horizontal).padding(.vertical, 8)
                 Divider().background(Color.gray.opacity(0.2)).padding(.leading)
             }
         }
@@ -280,5 +304,12 @@ struct WorkoutAnalyticsView: View {
         let h = total / 3600, m = (total % 3600) / 60, s = total % 60
         if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
         return String(format: "%d:%02d", m, s)
+    }
+
+    private func formatHHMM(_ seconds: Double) -> String {
+        let total = Int(seconds)
+        let h = total / 3600, m = (total % 3600) / 60
+        if h > 0 { return String(format: "%dh %02dm", h, m) }
+        return String(format: "%dm", m)
     }
 }

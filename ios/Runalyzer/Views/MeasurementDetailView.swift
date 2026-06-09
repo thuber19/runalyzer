@@ -6,6 +6,12 @@ import Charts
 struct MeasurementDetailView: View {
     let measurement: SensorMeasurement
     @EnvironmentObject var measurementStore: MeasurementStore
+    @State private var loadedDataPoints: [DataPoint]?
+
+    /// DataPoints loaded on demand from SQLite.
+    private var dataPoints: [DataPoint] {
+        loadedDataPoints ?? []
+    }
 
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
@@ -30,6 +36,11 @@ struct MeasurementDetailView: View {
         }
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle(measurement.dateString)
+        .onAppear {
+            if loadedDataPoints == nil {
+                loadedDataPoints = measurementStore.dataPoints(for: measurement.id)
+            }
+        }
     }
 
     // MARK: - Type-Specific Summary
@@ -38,10 +49,9 @@ struct MeasurementDetailView: View {
     private var summarySection: some View {
         switch measurement.type {
         case .metric:       metricSummary
-        case .hkWorkout:    workoutSummary
-        case .workout:      imuWorkoutSummary
         case .bodyComp:     bodyCompSummary
         case .derived:      derivedSummary
+        default:            EmptyView()
         }
     }
 
@@ -50,13 +60,13 @@ struct MeasurementDetailView: View {
     private var metricSummary: some View {
         VStack(spacing: 12) {
             // Detect which metric type this is
-            let sleepPoints = measurement.dataPoints.filter { $0.type == DataType.sleepStage }
+            let sleepPoints = dataPoints.filter { $0.type == DataType.sleepStage }
 
             if !sleepPoints.isEmpty {
                 sleepSummaryView(sleepPoints)
             } else {
                 // Generic metric: show stats per type
-                let grouped = Dictionary(grouping: measurement.dataPoints) { $0.type }
+                let grouped = Dictionary(grouping: dataPoints) { $0.type }
                 ForEach(grouped.keys.sorted(), id: \.self) { key in
                     let pts = grouped[key] ?? []
                     metricStatCard(type: key, points: pts)
@@ -175,7 +185,7 @@ struct MeasurementDetailView: View {
     // MARK: - HK Workout Summary
 
     private var workoutSummary: some View {
-        let dp = measurement.dataPoints
+        let dp = dataPoints
         let activityName = dp.first(where: { $0.type == DataType.workoutType })?.unit ?? "Workout"
         let duration = dp.first(where: { $0.type == DataType.workoutDuration })?.value ?? 0
         let distance = dp.first(where: { $0.type == DataType.workoutDistance })?.value
@@ -416,7 +426,7 @@ struct MeasurementDetailView: View {
     // MARK: - IMU Workout Summary
 
     private var imuWorkoutSummary: some View {
-        let dp = measurement.dataPoints
+        let dp = dataPoints
         return VStack(spacing: 8) {
             Text("IMU WORKOUT").font(.caption2).foregroundColor(.gray)
             HStack(spacing: 20) {
@@ -443,7 +453,7 @@ struct MeasurementDetailView: View {
     // MARK: - Body Comp Summary
 
     private var bodyCompSummary: some View {
-        let dp = measurement.dataPoints
+        let dp = dataPoints
         let primary = dp.filter { $0.role == .primary }
         let detail = dp.filter { $0.role == .detail }
 
@@ -472,7 +482,7 @@ struct MeasurementDetailView: View {
     // MARK: - Derived Summary (Recovery, Enrichment)
 
     private var derivedSummary: some View {
-        let dp = measurement.dataPoints
+        let dp = dataPoints
         let primary = dp.filter { $0.role == .primary }
         let detail = dp.filter { $0.role == .detail }
 
@@ -505,7 +515,7 @@ struct MeasurementDetailView: View {
     private var dataPointsList: some View {
         VStack(alignment: .leading, spacing: 0) {
             DisclosureGroup {
-                let sorted = measurement.dataPoints.sorted { $0.timestamp < $1.timestamp }
+                let sorted = dataPoints.sorted { $0.timestamp < $1.timestamp }
                 let limit = showAllDataPoints ? sorted.count : min(100, sorted.count)
                 let visible = Array(sorted.prefix(limit))
                 ForEach(Array(visible.enumerated()), id: \.offset) { _, dp in
@@ -535,7 +545,7 @@ struct MeasurementDetailView: View {
                 HStack {
                     Text("DATA POINTS").font(.caption2).foregroundColor(.gray)
                     Spacer()
-                    Text("\(measurement.dataPoints.count)").font(.caption2).foregroundColor(.gray)
+                    Text("\(dataPoints.count)").font(.caption2).foregroundColor(.gray)
                 }
             }
             .tint(.gray)
@@ -571,8 +581,8 @@ struct MeasurementDetailView: View {
                 }
                 .frame(maxHeight: 500)
 
-                if !showFullRawJSON && measurement.dataPoints.count > 100 {
-                    Button("Show full JSON (\(measurement.dataPoints.count) data points)") {
+                if !showFullRawJSON && dataPoints.count > 100 {
+                    Button("Show full JSON (\(dataPoints.count) data points)") {
                         showFullRawJSON = true
                     }
                     .font(.caption).foregroundColor(.cyan)
@@ -587,7 +597,7 @@ struct MeasurementDetailView: View {
     @State private var showFullRawJSON = false
 
     private var rawJSON: String {
-        let maxPoints = showFullRawJSON ? measurement.dataPoints.count : 100
+        let maxPoints = showFullRawJSON ? dataPoints.count : 100
         var limited = measurement
         let truncated = limited.dataPoints.count > maxPoints
         if truncated {
@@ -601,7 +611,7 @@ struct MeasurementDetailView: View {
             return "{ \"error\": \"encoding failed\" }"
         }
         if truncated {
-            return json + "\n\n... \(measurement.dataPoints.count - maxPoints) more data points truncated\nTap 'Show Full' below"
+            return json + "\n\n... \(dataPoints.count - maxPoints) more data points truncated\nTap 'Show Full' below"
         }
         return json
     }

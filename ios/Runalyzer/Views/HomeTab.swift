@@ -4,6 +4,8 @@ import Charts
 /// Dashboard home page with health overview tiles.
 struct HomeTab: View {
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var sourcePrefs: SourcePreferenceStore
+    @EnvironmentObject var workoutStore: WorkoutStore
 
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
     private let cal = Calendar.current
@@ -129,7 +131,7 @@ struct HomeTab: View {
     private var rhrTile: some View {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
         let points = metricIndex.query(type: DataType.restingHeartRate, measurementType: .metric,
-                                       from: weekAgo, to: Date())
+                                       from: weekAgo, to: Date(), filter: sourcePrefs)
         let latest = points.last?.value
 
         return tile {
@@ -156,7 +158,7 @@ struct HomeTab: View {
     private var hrvTile: some View {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
         let points = metricIndex.query(type: DataType.hrvSDNN, measurementType: .metric,
-                                       from: weekAgo, to: Date())
+                                       from: weekAgo, to: Date(), filter: sourcePrefs)
         // Daily averages for sparkline
         var dailyAvgs: [Double] = []
         var byDay: [Date: [Double]] = [:]
@@ -197,7 +199,10 @@ struct HomeTab: View {
         let sleepMeasurement = metricIndex.metricMeasurement(forDay: today, containingType: DataType.sleepStage)
             ?? metricIndex.metricMeasurement(forDay: cal.date(byAdding: .day, value: -1, to: today)!,
                                              containingType: DataType.sleepStage)
-        let sleepPoints = sleepMeasurement?.dataPoints.filter { $0.type == DataType.sleepStage } ?? []
+        let sleepPoints = sourcePrefs.apply(
+            to: sleepMeasurement?.dataPoints.filter { $0.type == DataType.sleepStage } ?? [],
+            dataType: DataType.sleepStage
+        )
 
         // Prefer Watch staged data over generic iPhone data
         let hasStages = sleepPoints.contains { ["Core", "Deep", "REM"].contains($0.unit) }
@@ -249,7 +254,7 @@ struct HomeTab: View {
         let today = cal.startOfDay(for: Date())
         let todayEnd = Date()
         let stepsPoints = metricIndex.query(type: DataType.steps, measurementType: .metric,
-                                            from: today, to: todayEnd)
+                                            from: today, to: todayEnd, filter: sourcePrefs)
         // Use max source value (not sum — iPhone + Watch count same steps)
         let total = stepsPoints.map(\.value).max() ?? 0
 
@@ -270,17 +275,13 @@ struct HomeTab: View {
 
     private var workoutsTile: some View {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
-        let workouts = measurementStore.measurements.filter {
-            $0.type == .hkWorkout && $0.date >= weekAgo
-        }
-        let totalMinutes = workouts.compactMap { m in
-            m.dataPoints.first(where: { $0.type == DataType.workoutDuration })?.value
-        }.reduce(0, +) / 60
+        let recentWorkouts = workoutStore.workouts(from: weekAgo, to: Date())
+        let totalMinutes = recentWorkouts.compactMap(\.durationSec).reduce(0, +) / 60
 
         return tile {
             VStack(alignment: .leading, spacing: 6) {
                 Text("WORKOUTS").font(.caption2).foregroundColor(.gray)
-                Text("\(workouts.count)").font(.title.bold().monospacedDigit())
+                Text("\(recentWorkouts.count)").font(.title.bold().monospacedDigit())
                 Text(String(format: "%.0fm this week", totalMinutes))
                     .font(.caption2).foregroundColor(.gray)
             }

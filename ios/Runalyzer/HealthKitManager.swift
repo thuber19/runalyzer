@@ -124,7 +124,8 @@ class HealthKitManager: ObservableObject {
         let quantityIDs: [HKQuantityTypeIdentifier] = [
             .heartRate, .stepCount, .distanceWalkingRunning, .distanceCycling,
             .activeEnergyBurned, .heartRateVariabilitySDNN, .restingHeartRate,
-            .oxygenSaturation, .bodyTemperature, .vo2Max
+            .oxygenSaturation, .bodyTemperature, .vo2Max,
+            .runningSpeed
         ]
         for id in quantityIDs {
             if let t = HKQuantityType.quantityType(forIdentifier: id) { types.insert(t) }
@@ -310,6 +311,18 @@ class HealthKitManager: ObservableObject {
         group.notify(queue: .main) {
             completion(result)
         }
+    }
+
+    // MARK: - Public Sample Fetch
+
+    /// Fetch raw step count samples within a predicate. Used for cadence derivation.
+    func fetchStepSamples(predicate: NSPredicate, completion: @escaping ([HKQuantitySample]) -> Void) {
+        fetchSamples(.stepCount, predicate: predicate, completion: completion)
+    }
+
+    /// Fetch Apple's pre-calculated running speed samples (m/s). Used for pace/speed in workout detail.
+    func fetchRunningSpeedSamples(predicate: NSPredicate, completion: @escaping ([HKQuantitySample]) -> Void) {
+        fetchSamples(.runningSpeed, predicate: predicate, completion: completion)
     }
 
     // MARK: - Helpers

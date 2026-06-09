@@ -4,6 +4,7 @@ import Charts
 /// Sleep-specific trend view showing nightly duration stacked by stage.
 struct SleepTrendView: View {
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var sourcePrefs: SourcePreferenceStore
     @State private var timeRange: MetricTrendView.TimeRange = .month
 
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
@@ -11,7 +12,8 @@ struct SleepTrendView: View {
 
     private var sleepNights: [(date: Date, deep: Double, core: Double, rem: Double, awake: Double)] {
         guard let start = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) else { return [] }
-        let points = metricIndex.query(type: DataType.sleepStage, measurementType: .metric, from: start, to: Date())
+        let points = metricIndex.query(type: DataType.sleepStage, measurementType: .metric,
+                                       from: start, to: Date(), filter: sourcePrefs)
 
         var byDay: [Date: [DataPoint]] = [:]
         for p in points {

@@ -9,6 +9,7 @@ struct MetricTrendView: View {
     let unit: String
     let color: Color
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var sourcePrefs: SourcePreferenceStore
 
     @State private var timeRange: TimeRange = .month
 
@@ -30,8 +31,8 @@ struct MetricTrendView: View {
 
     private var dataPoints: [DataPoint] {
         guard let start = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) else { return [] }
-        // Query across ALL measurement types (metrics are .metric, recovery is .derived, etc.)
-        return metricIndex.query(type: metricType, from: start, to: Date())
+        // Query across ALL measurement types, filtered to enabled sources
+        return metricIndex.query(type: metricType, from: start, to: Date(), filter: sourcePrefs)
     }
 
     private var aggregates: [MetricAggregator.DailyAggregate] {

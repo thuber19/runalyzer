@@ -4,7 +4,7 @@ import SwiftUI
 struct RunalyzerTab: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var metrics: RunMetrics
-    @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var workoutStore: WorkoutStore
 
     private var imu: IMUSensorDriver? { coordinator.imuDriver }
     private var isConnected: Bool { imu != nil }
@@ -16,7 +16,7 @@ struct RunalyzerTab: View {
                     // Live section
                     LiveDashboardView()
 
-                    // Workout history
+                    // Workout history (IMU recordings)
                     workoutHistory
                 }
                 .padding()
@@ -27,29 +27,27 @@ struct RunalyzerTab: View {
     }
 
     private var workoutHistory: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            let workouts = measurementStore.measurements(ofType: .workout)
-            if workouts.isEmpty {
+        let imuWorkouts = workoutStore.workouts.filter { $0.activityType == "IMU Recording" }
+
+        return VStack(alignment: .leading, spacing: 0) {
+            if imuWorkouts.isEmpty {
                 Text("No recordings yet. Connect your sensor and start recording.")
                     .foregroundColor(.gray)
                     .padding()
             } else {
-                ForEach(workouts) { m in
-                    NavigationLink(destination: MeasurementDetailView(measurement: m)) {
-                        HStack(spacing: 12) {
-                            Image(systemName: m.icon).foregroundColor(Color(hex: 0xe94560)).frame(width: 24)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(m.dateString).font(.subheadline)
-                                Text(m.summary).font(.caption).foregroundColor(.gray)
-                                Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right").foregroundColor(.gray).font(.caption2)
+                ForEach(imuWorkouts) { w in
+                    HStack(spacing: 12) {
+                        Image(systemName: w.icon).foregroundColor(Color(hex: 0xe94560)).frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(w.dateString).font(.subheadline)
+                            Text(w.summary).font(.caption).foregroundColor(.gray)
                         }
-                        .padding(.horizontal).padding(.vertical, 10)
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundColor(.gray).font(.caption2)
                     }
-                    .buttonStyle(.plain)
-                    if m.id != workouts.last?.id {
+                    .padding(.horizontal).padding(.vertical, 10)
+
+                    if w.id != imuWorkouts.last?.id {
                         Divider().background(Color.gray.opacity(0.2)).padding(.leading, 48)
                     }
                 }

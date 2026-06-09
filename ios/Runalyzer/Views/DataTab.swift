@@ -1,38 +1,93 @@
 import SwiftUI
+import GRDB
 
+/// Database browser view — shows all data grouped by day.
+/// Each row is a data type for that day (HR, HRV, Steps, Sleep, etc.)
+/// or a workout. Tap → intraday detail or workout detail.
 private enum DataFilter: String, CaseIterable {
     case all        = "All"
-    case hkWorkout  = "Workouts"
-    case imuWorkout = "IMU"
+    case workouts   = "Workouts"
     case bodyComp   = "Body Comp"
-    case metric     = "Metrics"
+    case metrics    = "Metrics"
     case recovery   = "Recovery"
 }
 
-/// Unified view of ALL measurements from all sources
 struct DataTab: View {
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var workoutStore: WorkoutStore
     @State private var filter: DataFilter = .all
-    @State private var selection = Set<UUID>()
-    @State private var editMode: EditMode = .inactive
-    @State private var showDeleteConfirmation = false
-    @State private var pendingDeleteIDs = Set<UUID>()
+    @State private var showDeleteAll = false
 
-    private var filtered: [SensorMeasurement] {
-        let sorted = measurementStore.measurements.sorted { $0.date > $1.date }
-        switch filter {
-        case .all:        return sorted
-        case .hkWorkout: return sorted.filter { $0.type == .hkWorkout }
-        case .imuWorkout: return sorted.filter { $0.type == .workout }
-        case .bodyComp:  return sorted.filter { $0.type == .bodyComp }
-        case .metric:    return sorted.filter { $0.type == .metric }
-        case .recovery:  return sorted.filter { isRecovery($0) }
+    private let cal = Calendar.current
+
+    /// A row in the data browser — either a metric type for a day, or a workout.
+    fileprivate enum DataRow: Identifiable {
+        case metric(date: Date, type: String, count: Int, summary: String)
+        case workout(Workout)
+        case bodyComp(SensorMeasurement)
+        case derived(SensorMeasurement)
+
+        var id: String {
+            switch self {
+            case .metric(let date, let type, _, _):
+                return "m-\(Int(date.timeIntervalSince1970))-\(type)"
+            case .workout(let w): return "w-\(w.id.uuidString)"
+            case .bodyComp(let m): return "bc-\(m.id.uuidString)"
+            case .derived(let m): return "d-\(m.id.uuidString)"
+            }
+        }
+
+        var date: Date {
+            switch self {
+            case .metric(let date, _, _, _): return date
+            case .workout(let w): return w.startDate
+            case .bodyComp(let m): return m.date
+            case .derived(let m): return m.date
+            }
+        }
+    }
+
+    /// All rows grouped by day, sorted newest first, filtered by current filter.
+    private var sections: [(date: Date, label: String, rows: [DataRow])] {
+        var rowsByDay: [Date: [DataRow]] = [:]
+
+        if filter == .all || filter == .metrics {
+            for row in buildMetricRows() {
+                let day = cal.startOfDay(for: row.date)
+                rowsByDay[day, default: []].append(row)
+            }
+        }
+
+        if filter == .all || filter == .workouts {
+            for w in workoutStore.workouts {
+                let day = cal.startOfDay(for: w.startDate)
+                rowsByDay[day, default: []].append(.workout(w))
+            }
+        }
+
+        if filter == .all || filter == .bodyComp {
+            for m in measurementStore.measurements(ofType: .bodyComp) {
+                let day = cal.startOfDay(for: m.date)
+                rowsByDay[day, default: []].append(.bodyComp(m))
+            }
+        }
+
+        if filter == .all || filter == .recovery {
+            for m in measurementStore.measurements(ofType: .derived) {
+                let day = cal.startOfDay(for: m.date)
+                rowsByDay[day, default: []].append(.derived(m))
+            }
+        }
+
+        return rowsByDay.keys.sorted(by: >).map { day in
+            let rows = rowsByDay[day]!.sorted(by: { (a: DataRow, b: DataRow) in a.sortOrder < b.sortOrder })
+            return (date: day, label: dayLabel(day), rows: rows)
         }
     }
 
     var body: some View {
         NavigationStack {
-            List(selection: $selection) {
+            List {
                 // Filter chips
                 Section {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -44,79 +99,49 @@ struct DataTab: View {
                         .padding(.vertical, 4)
                     }
                 }
-                .listRowBackground(Color(hex: 0x1a1a2e))
+                .listRowBackground(Color.appBackground)
                 .listRowInsets(EdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12))
 
-                // Measurements
-                if filtered.isEmpty {
+                if sections.isEmpty {
                     Text("No data").foregroundColor(.gray)
-                        .listRowBackground(Color(hex: 0x16213e))
+                        .listRowBackground(Color.appSurface)
                 } else {
-                    ForEach(filtered) { m in
-                        NavigationLink(destination: MeasurementDetailView(measurement: m)) {
-                            HStack(spacing: 12) {
-                                Image(systemName: m.icon)
-                                    .foregroundColor(iconColor(m))
-                                    .frame(width: 24)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(m.dateString).font(.subheadline)
-                                    Text(m.summary).font(.caption).foregroundColor(.gray)
-                                    Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
-                                }
+                    ForEach(sections, id: \.date) { section in
+                        Section(section.label) {
+                            ForEach(section.rows) { row in
+                                rowView(row)
+                                    .listRowBackground(Color.appSurface)
+                                    .swipeActions(edge: .trailing) {
+                                        Button(role: .destructive) { deleteRow(row) } label: {
+                                            Label("Delete", systemImage: "trash")
+                                        }
+                                    }
                             }
                         }
-                        .listRowBackground(Color(hex: 0x16213e))
-                    }
-                    .onDelete { indexSet in
-                        pendingDeleteIDs = Set(indexSet.map { filtered[$0].id })
-                        showDeleteConfirmation = true
                     }
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Color(hex: 0x1a1a2e))
+            .background(Color.appBackground)
             .navigationTitle("Data")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    EditButton()
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    if editMode == .active {
-                        Button(selection.count == filtered.count ? "Deselect All" : "Select All") {
-                            if selection.count == filtered.count {
-                                selection.removeAll()
-                            } else {
-                                selection = Set(filtered.map(\.id))
-                            }
-                        }
-                        if !selection.isEmpty {
-                            Button("Delete \(selection.count)", role: .destructive) {
-                                pendingDeleteIDs = selection
-                                showDeleteConfirmation = true
-                            }
-                        }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Delete All", role: .destructive) {
+                        showDeleteAll = true
                     }
+                    .foregroundColor(.red)
                 }
             }
-            .environment(\.editMode, $editMode)
-            .alert("Delete \(pendingDeleteIDs.count) measurement\(pendingDeleteIDs.count == 1 ? "" : "s")?",
-                   isPresented: $showDeleteConfirmation) {
-                Button("Delete", role: .destructive) {
-                    measurementStore.deleteBatch(pendingDeleteIDs)
-                    selection.removeAll()
-                    pendingDeleteIDs.removeAll()
-                    editMode = .inactive
+            .alert("Delete all data?", isPresented: $showDeleteAll) {
+                Button("Delete All", role: .destructive) {
+                    deleteAllVisible()
                 }
-                Button("Cancel", role: .cancel) {
-                    pendingDeleteIDs.removeAll()
-                }
+                Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This cannot be undone.")
+                Text("This will delete all \(filter.rawValue.lowercased()) data. This cannot be undone.")
             }
         }
     }
-
-    // MARK: - Helpers
 
     private func filterChip(_ f: DataFilter) -> some View {
         let active = filter == f
@@ -125,26 +150,260 @@ struct DataTab: View {
                 .font(.caption.weight(active ? .semibold : .regular))
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(active ? Color(hex: 0x5dadec) : Color(hex: 0x16213e))
+                .background(active ? Color.appBlue : Color.appSurface)
                 .foregroundColor(active ? .black : .gray)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
     }
 
-    private func iconColor(_ m: SensorMeasurement) -> Color {
-        if isRecovery(m) { return Color(hex: 0xf4a261) }
-        switch m.type {
-        case .workout:   return Color(hex: 0xe94560)
-        case .hkWorkout: return .pink
-        case .derived:   return Color(hex: 0x5dadec)
-        case .bodyComp:  return .green
-        case .metric:    return .cyan
+    private func deleteRow(_ row: DataRow) {
+        switch row {
+        case .workout(let w):
+            workoutStore.delete(w.id)
+        case .bodyComp(let m), .derived(let m):
+            measurementStore.delete(m.id)
+        case .metric(_, _, _, _):
+            break  // Metric rows are aggregates — delete via Delete All
         }
     }
 
-    private func isRecovery(_ m: SensorMeasurement) -> Bool {
-        m.type == .derived && m.dataPoints.contains { $0.type == DataType.recoveryIndex }
+    private func deleteAllVisible() {
+        // Delete all items matching the current filter
+        switch filter {
+        case .all:
+            let mIDs = Set(measurementStore.measurements.map(\.id))
+            let wIDs = Set(workoutStore.workouts.map(\.id))
+            if !mIDs.isEmpty { measurementStore.deleteBatch(mIDs) }
+            if !wIDs.isEmpty { workoutStore.deleteBatch(wIDs) }
+        case .workouts:
+            let ids = Set(workoutStore.workouts.map(\.id))
+            if !ids.isEmpty { workoutStore.deleteBatch(ids) }
+        case .bodyComp:
+            let ids = Set(measurementStore.measurements(ofType: .bodyComp).map(\.id))
+            if !ids.isEmpty { measurementStore.deleteBatch(ids) }
+        case .metrics:
+            let ids = Set(measurementStore.measurements(ofType: .metric).map(\.id))
+            if !ids.isEmpty { measurementStore.deleteBatch(ids) }
+        case .recovery:
+            let ids = Set(measurementStore.measurements(ofType: .derived).map(\.id))
+            if !ids.isEmpty { measurementStore.deleteBatch(ids) }
+        }
     }
 
+    // MARK: - Row Views
+
+    @ViewBuilder
+    private func rowView(_ row: DataRow) -> some View {
+        switch row {
+        case .metric(let date, let type, let count, let summary):
+            NavigationLink(destination: IntradayView(
+                metricType: type, title: prettyType(type),
+                unit: unitFor(type), color: colorFor(type), date: date
+            )) {
+                HStack(spacing: 12) {
+                    Image(systemName: iconFor(type))
+                        .foregroundColor(colorFor(type))
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(prettyType(type)).font(.subheadline)
+                        Text(summary).font(.caption).foregroundColor(.gray)
+                    }
+                    Spacer()
+                    Text("\(count)").font(.caption2).foregroundColor(.gray)
+                }
+            }
+
+        case .workout(let w):
+            NavigationLink(destination: WorkoutDetailView(workout: w)) {
+                HStack(spacing: 12) {
+                    Image(systemName: w.icon)
+                        .foregroundColor(.pink)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(w.activityType).font(.subheadline)
+                        Text(w.summary).font(.caption).foregroundColor(.gray)
+                    }
+                }
+            }
+
+        case .bodyComp(let m):
+            NavigationLink(destination: MeasurementDetailView(measurement: m)) {
+                HStack(spacing: 12) {
+                    Image(systemName: "scalemass")
+                        .foregroundColor(.green)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Body Composition").font(.subheadline)
+                        Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
+                    }
+                }
+            }
+
+        case .derived(let m):
+            NavigationLink(destination: MeasurementDetailView(measurement: m)) {
+                HStack(spacing: 12) {
+                    Image(systemName: "function")
+                        .foregroundColor(Color.appBlue)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Recovery").font(.subheadline)
+                        Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Metric Row Builder
+
+    /// Query the DB for distinct (day, type, count) — only from .metric measurements.
+    /// Body comp and derived DataPoints have their own dedicated row types.
+    private func buildMetricRows() -> [DataRow] {
+        let sql = """
+            SELECT
+                CAST(dp.timestamp / 86400 AS INTEGER) * 86400 AS dayEpoch,
+                dp.type,
+                COUNT(*) AS cnt,
+                AVG(dp.value) AS avgVal,
+                MIN(dp.value) AS minVal,
+                MAX(dp.value) AS maxVal,
+                dp.unit
+            FROM data_point dp
+            JOIN measurement m ON dp.measurementId = m.id
+            WHERE m.type = 'metric'
+            GROUP BY dayEpoch, dp.type
+            ORDER BY dayEpoch DESC, dp.type
+            """
+
+        do {
+            return try AppDatabase.shared.dbQueue.read { db in
+                let rows = try Row.fetchAll(db, sql: sql)
+                return rows.map { row in
+                    let dayEpoch: Double = row["dayEpoch"]
+                    let type: String = row["type"]
+                    let count: Int = row["cnt"]
+                    let avg: Double = row["avgVal"]
+                    let min: Double = row["minVal"]
+                    let max: Double = row["maxVal"]
+                    let unit: String = row["unit"]
+                    let date = Date(timeIntervalSince1970: dayEpoch)
+
+                    let summary = formatMetricSummary(type: type, count: count,
+                                                      avg: avg, min: min, max: max, unit: unit)
+                    return DataRow.metric(date: date, type: type, count: count, summary: summary)
+                }
+            }
+        } catch {
+            return []
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func dayLabel(_ date: Date) -> String {
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        let f = DateFormatter()
+        f.dateFormat = "E, d MMM yyyy"
+        return f.string(from: date)
+    }
+
+    private func formatMetricSummary(type: String, count: Int, avg: Double,
+                                      min: Double, max: Double, unit: String) -> String {
+        switch type {
+        case DataType.heartRateSample:
+            return String(format: "%.0f avg · %.0f–%.0f bpm · %d samples", avg, min, max, count)
+        case DataType.hrvSDNN:
+            return String(format: "%.0f ms avg · %d readings", avg, count)
+        case DataType.restingHeartRate:
+            return String(format: "%.0f bpm · %d readings", min, count)
+        case DataType.steps:
+            return String(format: "%.0f steps", max)  // max source value
+        case DataType.bloodOxygen:
+            return String(format: "%.0f%% · %d readings", avg * 100, count)
+        case DataType.vo2Max:
+            return String(format: "%.1f mL/kg/min", avg)
+        case DataType.bodyTemperature:
+            return String(format: "%.1f°C", avg)
+        case DataType.sleepStage:
+            return String(format: "%d stages", count)
+        default:
+            return String(format: "%.1f %@ avg · %d pts", avg, unit, count)
+        }
+    }
+
+    private func prettyType(_ type: String) -> String {
+        switch type {
+        case DataType.heartRateSample:  return "Heart Rate"
+        case DataType.hrvSDNN:          return "HRV (SDNN)"
+        case DataType.restingHeartRate: return "Resting Heart Rate"
+        case DataType.steps:            return "Steps"
+        case DataType.bloodOxygen:      return "Blood Oxygen"
+        case DataType.vo2Max:           return "VO2 Max"
+        case DataType.bodyTemperature:  return "Body Temperature"
+        case DataType.sleepStage:       return "Sleep"
+        case DataType.cadence:          return "Cadence"
+        default:
+            return type.replacingOccurrences(of: "_", with: " ")
+                .split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                .joined(separator: " ")
+        }
+    }
+
+    private func iconFor(_ type: String) -> String {
+        switch type {
+        case DataType.heartRateSample:  return "heart.fill"
+        case DataType.hrvSDNN:          return "waveform.path.ecg"
+        case DataType.restingHeartRate: return "heart"
+        case DataType.steps:            return "figure.walk"
+        case DataType.bloodOxygen:      return "lungs"
+        case DataType.vo2Max:           return "wind"
+        case DataType.bodyTemperature:  return "thermometer"
+        case DataType.sleepStage:       return "bed.double"
+        case DataType.cadence:          return "metronome"
+        default:                        return "chart.bar"
+        }
+    }
+
+    private func colorFor(_ type: String) -> Color {
+        switch type {
+        case DataType.heartRateSample:  return .red
+        case DataType.hrvSDNN:          return .purple
+        case DataType.restingHeartRate: return .red
+        case DataType.steps:            return .green
+        case DataType.bloodOxygen:      return .blue
+        case DataType.vo2Max:           return .orange
+        case DataType.bodyTemperature:  return .yellow
+        case DataType.sleepStage:       return .indigo
+        case DataType.cadence:          return .mint
+        default:                        return .cyan
+        }
+    }
+
+    private func unitFor(_ type: String) -> String {
+        switch type {
+        case DataType.heartRateSample, DataType.restingHeartRate: return "bpm"
+        case DataType.hrvSDNN:          return "ms"
+        case DataType.steps:            return "steps"
+        case DataType.bloodOxygen:      return "%"
+        case DataType.vo2Max:           return "mL/kg/min"
+        case DataType.bodyTemperature:  return "°C"
+        case DataType.cadence:          return "spm"
+        default:                        return ""
+        }
+    }
+}
+
+// MARK: - Sort order for rows within a day
+
+fileprivate extension DataTab.DataRow {
+    var sortOrder: Int {
+        switch self {
+        case .workout:  return 0
+        case .metric:   return 1
+        case .bodyComp: return 2
+        case .derived:  return 3
+        }
+    }
 }

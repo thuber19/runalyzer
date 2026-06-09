@@ -27,6 +27,11 @@ struct SettingsView: View {
 
                 // Data
                 Section("Data") {
+                    NavigationLink(destination: SourcePreferencesView()) {
+                        Label("Data Sources", systemImage: "slider.horizontal.3")
+                    }
+                    .listRowBackground(Color(hex: 0x16213e))
+
                     // Import raw metrics from HealthKit
                     Button(action: {
                         isImporting = true

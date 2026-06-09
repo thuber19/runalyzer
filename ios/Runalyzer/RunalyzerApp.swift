@@ -1,17 +1,32 @@
 import SwiftUI
 import Combine
-import UIKit
+import UserNotifications
+import GRDB
 
 @main
 struct RunalyzerApp: App {
     @StateObject private var coordinator = DeviceCoordinator()
     @StateObject private var metrics = RunMetrics()
-    @StateObject private var store = MeasurementStore()
+    @StateObject private var store: MeasurementStore
+    @StateObject private var workoutStore: WorkoutStore
     @StateObject private var healthKit = HealthKitManager()
     @StateObject private var appWiring = AppWiring()
+    @StateObject private var sourcePrefs = SourcePreferenceStore()
 
     // Legacy — kept for existing session detail views that still reference SessionStore
     @StateObject private var sessions = SessionStore()
+
+    init() {
+        // Initialize database before stores
+        do {
+            AppDatabase.shared = try AppDatabase.openDefault()
+            AppDatabase.shared.migrateFromJSONIfNeeded()
+        } catch {
+            fatalError("Failed to open database: \(error)")
+        }
+        _store = StateObject(wrappedValue: MeasurementStore())
+        _workoutStore = StateObject(wrappedValue: WorkoutStore())
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -22,15 +37,13 @@ struct RunalyzerApp: App {
                 .environmentObject(healthKit)
                 .environmentObject(sessions)
                 .environmentObject(appWiring)
+                .environmentObject(sourcePrefs)
+                .environmentObject(workoutStore)
                 .onAppear {
                     healthKit.requestAuthorization()
                     appWiring.setup(coordinator: coordinator, metrics: metrics,
-                                   store: store, healthKit: healthKit, sessions: sessions)
-                }
-                .alert("Data Recovery", isPresented: $store.corruptDataDetected) {
-                    Button("OK", role: .cancel) {}
-                } message: {
-                    Text("Your measurement history could not be read and has been backed up. A fresh start has been created. If this keeps happening, please contact support.")
+                                   store: store, workoutStore: workoutStore,
+                                   healthKit: healthKit, sessions: sessions)
                 }
                 .alert("Data Recovery", isPresented: $sessions.corruptDataDetected) {
                     Button("OK", role: .cancel) {}
@@ -55,7 +68,8 @@ class AppWiring: ObservableObject {
     private(set) var metricProvider: HealthKitMetricProvider?
 
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
-               store: MeasurementStore, healthKit: HealthKitManager, sessions: SessionStore) {
+               store: MeasurementStore, workoutStore: WorkoutStore,
+               healthKit: HealthKitManager, sessions: SessionStore) {
 
         // Clear previous subscriptions (prevents duplicates if setup called multiple times)
         cancellables.removeAll()
@@ -67,8 +81,9 @@ class AppWiring: ObservableObject {
 
         // Create providers
         scaleProvider = ScaleMeasurementProvider(measurementStore: store)
-        imuProvider = IMUMeasurementProvider(measurementStore: store, sessionStore: sessions)
-        metricProvider = HealthKitMetricProvider(healthKit: healthKit, store: store, metricIndex: metricIndex)
+        imuProvider = IMUMeasurementProvider(workoutStore: workoutStore, sessionStore: sessions)
+        metricProvider = HealthKitMetricProvider(healthKit: healthKit, store: store,
+                                                workoutStore: workoutStore, metricIndex: metricIndex)
         recoveryProvider = RecoveryMeasurementProvider(metricIndex: metricIndex, measurementStore: store)
 
         // Per-descriptor handlers — keyed by DeviceDescriptor.id.
@@ -90,7 +105,7 @@ class AppWiring: ObservableObject {
             }
             .receive(on: DispatchQueue.main)
             .sink { hasUnsynced in
-                UIApplication.shared.applicationIconBadgeNumber = hasUnsynced ? 1 : 0
+                UNUserNotificationCenter.current().setBadgeCount(hasUnsynced ? 1 : 0)
             }
             .store(in: &cancellables)
 
@@ -153,6 +168,24 @@ class AppWiring: ObservableObject {
             }
             return nil  // callback-based wiring; no Combine subscription to track
         }
+    }
+
+    private func stripHeartRateSamplesFromMetricsIfNeeded() {
+        let key = "migration_strip_hr_samples_v2"
+        guard !UserDefaults.standard.bool(forKey: key) else { return }
+        do {
+            try AppDatabase.shared.dbQueue.write { db in
+                try db.execute(sql: """
+                    DELETE FROM data_point
+                    WHERE type = ? AND measurementId IN (
+                        SELECT id FROM measurement WHERE type = 'metric'
+                    )
+                    """, arguments: [DataType.heartRateSample])
+            }
+        } catch {
+            print("HR sample cleanup failed: \(error)")
+        }
+        UserDefaults.standard.set(true, forKey: key)
     }
 
     private static func scaleHandler(scaleProvider: ScaleMeasurementProvider?) -> (any DeviceDriver) -> AnyCancellable? {

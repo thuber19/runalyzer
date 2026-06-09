@@ -7,12 +7,15 @@ import os
 /// (new HRV readings appended when the app reopens during the day).
 class HealthKitMetricProvider {
     private weak var store: MeasurementStore?
+    private weak var workoutStore: WorkoutStore?
     private let healthKit: HealthKitManager
     private let metricIndex: MetricIndex
 
-    init(healthKit: HealthKitManager, store: MeasurementStore, metricIndex: MetricIndex) {
+    init(healthKit: HealthKitManager, store: MeasurementStore,
+         workoutStore: WorkoutStore, metricIndex: MetricIndex) {
         self.healthKit = healthKit
         self.store = store
+        self.workoutStore = workoutStore
         self.metricIndex = metricIndex
     }
 
@@ -31,7 +34,9 @@ class HealthKitMetricProvider {
     private func importAll(lookbackDays: Int, completion: (() -> Void)?) {
         let group = DispatchGroup()
 
-        // Quantity metrics — each gets its own daily measurement
+        // Quantity metrics — each gets its own daily measurement.
+        // HR samples are safe to import now — GRDB stores them in SQLite, not in memory.
+        // Workouts query HR by time window from the same data_point table.
         let bpmUnit = HKUnit.count().unitDivided(by: .minute())
         let quantityMetrics: [(HKQuantityTypeIdentifier, HKUnit, String)] = [
             (.heartRateVariabilitySDNN, HKUnit.secondUnit(with: .milli), DataType.hrvSDNN),
@@ -41,6 +46,7 @@ class HealthKitMetricProvider {
             (.bodyTemperature,          HKUnit.degreeCelsius(), DataType.bodyTemperature),
             (.vo2Max,                   HKUnit(from: "mL/kg*min"), DataType.vo2Max),
             (.stepCount,                HKUnit.count(), DataType.steps),
+            (.distanceWalkingRunning,   HKUnit.meter(), DataType.distance),
         ]
 
         for (identifier, unit, dataType) in quantityMetrics {
@@ -223,7 +229,7 @@ class HealthKitMetricProvider {
         }
     }
 
-    // MARK: - Workout Import (each workout = its own measurement)
+    // MARK: - Workout Import (now writes to WorkoutStore)
 
     private func importWorkouts(lookbackDays: Int, completion: @escaping () -> Void) {
         let cal = Calendar.current
@@ -232,134 +238,129 @@ class HealthKitMetricProvider {
             completion(); return
         }
 
-        // Phase 1: Fetch workout summaries (fast — uses workout statistics, no per-workout queries)
         healthKit.fetchWorkoutsWithDetails(from: rangeStart, to: Date()) { [weak self] workouts in
-            guard let self, let store = self.store else { completion(); return }
+            guard let self, let workoutStore = self.workoutStore else { completion(); return }
 
             DispatchQueue.main.async {
-                // Check both .hkWorkout and legacy .metric workouts for dedup
-                let existingWorkoutIDs = Set(
-                    store.measurements
-                        .filter { $0.type == .hkWorkout || $0.type == .metric }
-                        .compactMap { m in
-                            m.sources.first(where: { $0.serialNumber?.hasPrefix("hk:") == true })?.serialNumber
-                        }
-                )
+                // Dedup against existing workouts by HealthKit UUID
+                let existingIDs = workoutStore.existingHKWorkoutIDs()
 
-                // Build summary measurements for new workouts
-                var newMeasurements: [SensorMeasurement] = []
-                var newWorkoutDetails: [(id: UUID, start: Date, end: Date, src: String)] = []
+                var newWorkouts: [(workout: Workout, dataPoints: [DataPoint])] = []
 
                 for w in workouts {
-                    let hkID = DataSource.healthKit(w.id)
-                    guard !existingWorkoutIDs.contains(hkID) else { continue }
+                    let hkID = w.id.uuidString
+                    guard !existingIDs.contains(hkID) else { continue }
 
-                    var dp: [DataPoint] = []
                     let src = DataSource.healthKitSource(w.sourceName)
+                    let distanceActivities: Set<String> = [
+                        "Run", "Walk", "Cycle", "Hike", "Swim", "Rowing",
+                        "Elliptical", "Skating", "Cross Training", "HIIT"
+                    ]
+                    let distance = (w.distanceKm > 0.1 && distanceActivities.contains(w.activityName))
+                        ? w.distanceKm : nil
 
-                    dp.append(DataPoint(timestamp: w.startDate, endTimestamp: w.endDate,
-                                        type: DataType.workoutType, value: 0,
-                                        unit: w.activityName, source: src, role: .primary))
-                    dp.append(DataPoint(timestamp: w.startDate, endTimestamp: w.endDate,
-                                        type: DataType.workoutDuration, value: w.duration,
-                                        unit: "s", source: src, role: .primary))
-                    let distanceActivities: Set<String> = ["Run", "Walk", "Cycle", "Hike", "Swim", "Rowing", "Elliptical", "Skating", "Cross Training"]
-                    if w.distanceKm > 0.1 && distanceActivities.contains(w.activityName) {
-                        dp.append(DataPoint(timestamp: w.startDate, endTimestamp: w.endDate,
-                                            type: DataType.workoutDistance, value: w.distanceKm,
-                                            unit: "km", source: src, role: .primary))
-                    }
-                    if w.calories > 0 {
-                        dp.append(DataPoint(timestamp: w.startDate, endTimestamp: w.endDate,
-                                            type: DataType.workoutCalories, value: w.calories,
-                                            unit: "kcal", source: src, role: .detail))
-                    }
-                    if w.avgHeartRate > 0 {
-                        dp.append(DataPoint(timestamp: w.startDate, endTimestamp: w.endDate,
-                                            type: DataType.workoutAvgHR, value: w.avgHeartRate,
-                                            unit: "bpm", source: src, role: .primary))
-                    }
-                    if w.maxHeartRate > 0 {
-                        dp.append(DataPoint(timestamp: w.startDate, endTimestamp: w.endDate,
-                                            type: DataType.workoutMaxHR, value: w.maxHeartRate,
-                                            unit: "bpm", source: src, role: .detail))
-                    }
-
-                    let measID = UUID()
-                    let hkSource = MeasurementSource.healthKit(workoutID: w.id, name: w.activityName)
-                    let measurement = SensorMeasurement(
-                        id: measID, date: w.startDate, type: .hkWorkout,
-                        sources: [hkSource, MeasurementSource.healthKitDevice(name: w.sourceName)],
-                        dataPoints: dp, rawDataFiles: []
+                    let workout = Workout(
+                        id: UUID(),
+                        startDate: w.startDate,
+                        endDate: w.endDate,
+                        activityType: w.activityName,
+                        source: src,
+                        durationSec: w.duration,
+                        distanceKm: distance,
+                        calories: w.calories > 0 ? w.calories : nil,
+                        avgHR: w.avgHeartRate > 0 ? w.avgHeartRate : nil,
+                        maxHR: w.maxHeartRate > 0 ? w.maxHeartRate : nil,
+                        hkWorkoutId: w.id,
+                        rawDataFiles: [],
+                        linkedWorkoutId: nil
                     )
-                    newMeasurements.append(measurement)
-                    newWorkoutDetails.append((id: measID, start: w.startDate, end: w.endDate, src: w.sourceName))
+
+                    newWorkouts.append((workout: workout, dataPoints: []))
                 }
 
-                if !newMeasurements.isEmpty {
-                    store.saveBatch(newMeasurements)
-                    AppLogger.health.info("Imported \(newMeasurements.count) workout summaries")
+                if !newWorkouts.isEmpty {
+                    workoutStore.saveBatch(newWorkouts)
+                    AppLogger.health.info("Imported \(newWorkouts.count) workouts")
                 }
 
-                // Phase 2: Enrich with time-series data (HR, cadence, distance)
-                self.enrichWorkoutsWithTimeSeries(newWorkoutDetails, store: store) {
-                    completion()
-                }
+                // Import cadence for each workout (derived from step intervals — not covered by daily import).
+                // HR and distance are already imported as daily metrics.
+                self.importWorkoutCadence(newWorkouts.map(\.workout), completion: completion)
             }
         }
     }
 
-    /// Enrich workout measurements with time-series data (HR, cadence, distance).
-    /// Fetches all in parallel via DispatchGroup, then applies all updates in one saveIndex.
-    private func enrichWorkoutsWithTimeSeries(
-        _ workouts: [(id: UUID, start: Date, end: Date, src: String)],
-        store: MeasurementStore,
-        completion: @escaping () -> Void
-    ) {
-        guard !workouts.isEmpty else { completion(); return }
-
+    /// Import workout-specific metrics: cadence (from step intervals) and
+    /// running speed (Apple's pre-calculated GPS+sensor speed).
+    /// These only make sense during workouts, not as daily metrics.
+    private func importWorkoutCadence(_ workouts: [Workout], completion: @escaping () -> Void) {
+        guard let store = self.store, !workouts.isEmpty else { completion(); return }
+        let cal = Calendar.current
         let group = DispatchGroup()
-        let collectQueue = DispatchQueue(label: "workout.enrich")
-        var enrichments: [(id: UUID, points: [DataPoint])] = []
+        let collectQueue = DispatchQueue(label: "workout.metrics")
+        var allPoints: [(day: Date, type: String, points: [DataPoint])] = []
 
         for w in workouts {
+            let predicate = HKQuery.predicateForSamples(
+                withStart: w.startDate, end: w.endDate, options: .strictStartDate)
+
+            // Cadence from step count intervals
             group.enter()
-            healthKit.fetchWorkoutTimeSeries(from: w.start, to: w.end) { series in
+            healthKit.fetchStepSamples(predicate: predicate) { stepSamples in
                 var points: [DataPoint] = []
-                let src = DataSource.healthKitSource(w.src)
-                for (type, samples) in series {
-                    let unit: String
-                    switch type {
-                    case DataType.heartRateSample: unit = "bpm"
-                    case DataType.cadence: unit = "spm"
-                    case DataType.workoutDistance: unit = "km"
-                    default: unit = ""
-                    }
-                    for s in samples {
-                        points.append(DataPoint(timestamp: s.date, endTimestamp: nil,
-                                                type: type, value: s.value,
-                                                unit: unit, source: src, role: .detail))
-                    }
+                for s in stepSamples {
+                    let dur = s.endDate.timeIntervalSince(s.startDate)
+                    guard dur > 0 else { continue }
+                    let steps = s.quantity.doubleValue(for: .count())
+                    let cadence = (steps / dur) * 60
+                    let src = DataSource.healthKitSource(s.sourceRevision.source.name)
+                    points.append(DataPoint(
+                        timestamp: s.startDate.addingTimeInterval(dur / 2), endTimestamp: nil,
+                        type: DataType.cadence, value: cadence,
+                        unit: "spm", source: src, role: .detail
+                    ))
                 }
                 if !points.isEmpty {
-                    collectQueue.sync { enrichments.append((id: w.id, points: points)) }
+                    let day = cal.startOfDay(for: w.startDate)
+                    collectQueue.sync { allPoints.append((day: day, type: DataType.cadence, points: points)) }
+                }
+                group.leave()
+            }
+
+            // Running speed (Apple's pre-calculated m/s from GPS+sensors)
+            group.enter()
+            healthKit.fetchRunningSpeedSamples(predicate: predicate) { speedSamples in
+                let speedUnit = HKUnit.meter().unitDivided(by: .second())
+                var points: [DataPoint] = []
+                for s in speedSamples {
+                    let mps = s.quantity.doubleValue(for: speedUnit)
+                    let src = DataSource.healthKitSource(s.sourceRevision.source.name)
+                    points.append(DataPoint(
+                        timestamp: s.startDate, endTimestamp: nil,
+                        type: DataType.runningSpeed, value: mps,
+                        unit: "m/s", source: src, role: .detail
+                    ))
+                }
+                if !points.isEmpty {
+                    let day = cal.startOfDay(for: w.startDate)
+                    collectQueue.sync { allPoints.append((day: day, type: DataType.runningSpeed, points: points)) }
                 }
                 group.leave()
             }
         }
 
         group.notify(queue: .main) {
-            // Apply all enrichments to in-memory measurements, then save once
-            var updated = false
-            for (id, points) in enrichments {
-                if let idx = store.measurements.firstIndex(where: { $0.id == id }) {
-                    store.measurements[idx].dataPoints.append(contentsOf: points)
-                    updated = true
+            let metricIndex = MetricIndex(store: store)
+            for (day, dataType, points) in allPoints {
+                if let existing = metricIndex.metricMeasurement(forDay: day, containingType: dataType) {
+                    store.appendDataPoints(points, to: existing.id)
+                } else {
+                    let measurement = SensorMeasurement(
+                        id: UUID(), date: day, type: .metric,
+                        sources: [], dataPoints: points, rawDataFiles: []
+                    )
+                    store.save(measurement)
                 }
-            }
-            if updated {
-                store.saveIndex()
-                AppLogger.health.info("Enriched \(enrichments.count) workouts with time-series data")
             }
             completion()
         }

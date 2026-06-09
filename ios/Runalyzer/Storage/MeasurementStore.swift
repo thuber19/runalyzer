@@ -1,23 +1,49 @@
 import Foundation
 import Combine
+import GRDB
+import os
 
-/// Central storage for ALL measurements from ALL device types.
-/// Index stored as JSON, raw data in separate files.
+/// Central storage for measurements (metrics, body comp, derived scores).
+/// Backed by GRDB/SQLite. Workouts are stored separately in WorkoutStore.
+///
+/// The `measurements` array holds lightweight headers (no DataPoints) for
+/// list views. DataPoints are fetched from SQLite on demand.
 class MeasurementStore: ObservableObject {
     @Published var measurements: [SensorMeasurement] = []
-    @Published var corruptDataDetected = false
 
-    private var storageDir: URL {
-        let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let dir = base.appendingPathComponent("Runalyzer/Data", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
+    private let db: AppDatabase
+
+    private var storageDir: URL { AppDatabase.storageDir }
+
+    init(db: AppDatabase? = nil) {
+        self.db = db ?? AppDatabase.shared
+        loadMeasurements()
     }
 
-    private var indexURL: URL { storageDir.appendingPathComponent("measurements.json") }
+    // MARK: - Load (lightweight headers only)
 
-    init() { loadIndex() }
+    private func loadMeasurements() {
+        do {
+            let records: [MeasurementRecord] = try db.dbQueue.read { db in
+                try MeasurementRecord
+                    .order(Column("date").desc)
+                    .fetchAll(db)
+            }
+            // Load headers with sources but WITHOUT DataPoints (memory win)
+            measurements = try db.dbQueue.read { db in
+                try records.map { record in
+                    let sources = try MeasurementSourceRecord
+                        .filter(Column("measurementId") == record.id)
+                        .fetchAll(db)
+                        .map { $0.toModel() }
+                    return record.toModel(sources: sources)
+                }
+            }
+        } catch {
+            AppLogger.storage.error("Failed to load measurements: \(error.localizedDescription)")
+            measurements = []
+        }
+    }
 
     // MARK: - Query
 
@@ -29,21 +55,59 @@ class MeasurementStore: ObservableObject {
         measurements.first(where: { $0.id == id })
     }
 
-    func linkedMeasurements(for measurement: SensorMeasurement) -> [SensorMeasurement] {
-        guard let linked = measurement.linkedMeasurements else { return [] }
-        return linked.compactMap { id in measurements.first(where: { $0.id == id }) }
+    /// Fetch all DataPoints of a given type across all measurements via SQL.
+    /// Replaces the old in-memory `_dpIndex`.
+    func dataPoints(ofType type: String) -> [DataPoint] {
+        do {
+            return try db.dbQueue.read { db in
+                try DataPointRecord
+                    .filter(Column("type") == type)
+                    .order(Column("timestamp"))
+                    .fetchAll(db)
+                    .map { $0.toModel() }
+            }
+        } catch {
+            AppLogger.storage.error("dataPoints query failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Fetch all DataPoints for a specific measurement (on-demand loading).
+    func dataPoints(for measurementID: UUID) -> [DataPoint] {
+        do {
+            return try db.dbQueue.read { db in
+                try DataPointRecord
+                    .filter(Column("measurementId") == measurementID.uuidString)
+                    .order(Column("timestamp"))
+                    .fetchAll(db)
+                    .map { $0.toModel() }
+            }
+        } catch {
+            return []
+        }
+    }
+
+    /// Full measurement with all DataPoints loaded (for detail views).
+    func fullMeasurement(byID id: UUID) -> SensorMeasurement? {
+        guard let header = measurement(byID: id) else { return nil }
+        let dps = dataPoints(for: id)
+        return SensorMeasurement(
+            id: header.id, date: header.date, type: header.type,
+            sources: header.sources, dataPoints: dps,
+            rawDataFiles: header.rawDataFiles,
+            linkedMeasurements: header.linkedMeasurements,
+            inputMeasurements: header.inputMeasurements
+        )
     }
 
     // MARK: - Save
 
-    /// Save a measurement with optional raw data file.
-    /// Must be called on main thread (@Published mutations).
     @discardableResult
     func save(_ measurement: SensorMeasurement, rawData: [(filename: String, data: Data)] = []) -> Bool {
         assert(Thread.isMainThread, "MeasurementStore.save must be called on main thread")
         if measurements.contains(where: { $0.id == measurement.id }) { return true }
 
-        // Write raw data files
+        // Write raw data files to disk
         for raw in rawData {
             do {
                 try raw.data.write(to: storageDir.appendingPathComponent(raw.filename),
@@ -54,34 +118,142 @@ class MeasurementStore: ObservableObject {
             }
         }
 
-        measurements.insert(measurement, at: 0)
-        return saveIndex()
+        do {
+            try db.dbQueue.write { db in
+                let record = MeasurementRecord(from: measurement)
+                try record.insert(db)
+
+                for source in measurement.sources {
+                    let srcRecord = MeasurementSourceRecord(measurementId: record.id, from: source)
+                    try srcRecord.insert(db)
+                }
+
+                for dp in measurement.dataPoints {
+                    let dpRecord = DataPointRecord(measurementId: record.id, from: dp)
+                    try dpRecord.insert(db)
+                }
+            }
+
+            // Add lightweight header to in-memory array (no DataPoints)
+            let header = SensorMeasurement(
+                id: measurement.id, date: measurement.date, type: measurement.type,
+                sources: measurement.sources, dataPoints: [],
+                rawDataFiles: measurement.rawDataFiles,
+                linkedMeasurements: measurement.linkedMeasurements,
+                inputMeasurements: measurement.inputMeasurements
+            )
+            measurements.insert(header, at: 0)
+            return true
+        } catch {
+            print("Failed to save measurement to DB: \(error)")
+            return false
+        }
     }
 
-    /// Batch-save multiple measurements in one index write (avoids N re-encodes).
-    /// Must be called on main thread (@Published mutations).
     @discardableResult
     func saveBatch(_ newMeasurements: [SensorMeasurement]) -> Bool {
         assert(Thread.isMainThread, "MeasurementStore.saveBatch must be called on main thread")
-        var added = 0
-        for m in newMeasurements {
-            guard !measurements.contains(where: { $0.id == m.id }) else { continue }
-            measurements.insert(m, at: 0)
-            added += 1
+        let toInsert = newMeasurements.filter { m in
+            !measurements.contains(where: { $0.id == m.id })
         }
-        guard added > 0 else { return true }
-        return saveIndex()
+        guard !toInsert.isEmpty else { return true }
+
+        do {
+            try db.dbQueue.write { db in
+                for measurement in toInsert {
+                    let record = MeasurementRecord(from: measurement)
+                    try record.insert(db)
+
+                    for source in measurement.sources {
+                        let srcRecord = MeasurementSourceRecord(measurementId: record.id, from: source)
+                        try srcRecord.insert(db)
+                    }
+
+                    for dp in measurement.dataPoints {
+                        let dpRecord = DataPointRecord(measurementId: record.id, from: dp)
+                        try dpRecord.insert(db)
+                    }
+                }
+            }
+
+            for measurement in toInsert {
+                let header = SensorMeasurement(
+                    id: measurement.id, date: measurement.date, type: measurement.type,
+                    sources: measurement.sources, dataPoints: [],
+                    rawDataFiles: measurement.rawDataFiles,
+                    inputMeasurements: measurement.inputMeasurements
+                )
+                measurements.insert(header, at: 0)
+            }
+            return true
+        } catch {
+            print("Failed to save batch to DB: \(error)")
+            return false
+        }
     }
 
-    /// Replace an existing measurement by ID with an updated version (e.g., intraday metric update).
-    /// Must be called on main thread (@Published mutations).
     @discardableResult
     func update(_ measurement: SensorMeasurement) -> Bool {
         assert(Thread.isMainThread, "MeasurementStore.update must be called on main thread")
         guard let idx = measurements.firstIndex(where: { $0.id == measurement.id }) else { return false }
-        measurements[idx] = measurement
-        return saveIndex()
+
+        do {
+            try db.dbQueue.write { db in
+                let record = MeasurementRecord(from: measurement)
+                try record.update(db)
+
+                // Replace all sources
+                try db.execute(sql: "DELETE FROM measurement_source WHERE measurementId = ?",
+                               arguments: [record.id])
+                for source in measurement.sources {
+                    let srcRecord = MeasurementSourceRecord(measurementId: record.id, from: source)
+                    try srcRecord.insert(db)
+                }
+
+                // Replace all DataPoints
+                try db.execute(sql: "DELETE FROM data_point WHERE measurementId = ?",
+                               arguments: [record.id])
+                for dp in measurement.dataPoints {
+                    let dpRecord = DataPointRecord(measurementId: record.id, from: dp)
+                    try dpRecord.insert(db)
+                }
+            }
+
+            // Update in-memory header (without DataPoints)
+            measurements[idx] = SensorMeasurement(
+                id: measurement.id, date: measurement.date, type: measurement.type,
+                sources: measurement.sources, dataPoints: [],
+                rawDataFiles: measurement.rawDataFiles,
+                inputMeasurements: measurement.inputMeasurements
+            )
+            return true
+        } catch {
+            print("Failed to update measurement in DB: \(error)")
+            return false
+        }
     }
+
+    /// Append DataPoints to an existing measurement (used by HealthKit enrichment).
+    @discardableResult
+    func appendDataPoints(_ points: [DataPoint], to measurementID: UUID) -> Bool {
+        guard !points.isEmpty else { return true }
+        do {
+            try db.dbQueue.write { db in
+                for dp in points {
+                    let record = DataPointRecord(measurementId: measurementID.uuidString, from: dp)
+                    try record.insert(db)
+                }
+            }
+            return true
+        } catch {
+            print("Failed to append DataPoints: \(error)")
+            return false
+        }
+    }
+
+    /// Persist index — now a no-op (DB writes are immediate). Kept for API compatibility.
+    @discardableResult
+    func saveIndex() -> Bool { true }
 
     // MARK: - Load Raw Data
 
@@ -93,20 +265,13 @@ class MeasurementStore: ObservableObject {
         return samples
     }
 
-    // MARK: - Link
-
-    @discardableResult
-    func link(_ id1: UUID, with id2: UUID) -> Bool {
-        assert(Thread.isMainThread, "MeasurementStore.link must be called on main thread")
-        guard let idx1 = measurements.firstIndex(where: { $0.id == id1 }),
-              let idx2 = measurements.firstIndex(where: { $0.id == id2 }) else { return false }
-        var linked1 = measurements[idx1].linkedMeasurements ?? []
-        var linked2 = measurements[idx2].linkedMeasurements ?? []
-        if !linked1.contains(id2) { linked1.append(id2) }
-        if !linked2.contains(id1) { linked2.append(id1) }
-        measurements[idx1].linkedMeasurements = linked1
-        measurements[idx2].linkedMeasurements = linked2
-        return saveIndex()
+    /// Load IMU samples by workout (for the new Workout entity).
+    func loadIMUSamples(for workout: Workout) -> [RecordedSample] {
+        guard let fileName = workout.rawDataFiles.first(where: { $0.hasPrefix("imu_") }) else { return [] }
+        let url = storageDir.appendingPathComponent(fileName)
+        guard let data = try? Data(contentsOf: url),
+              let samples = try? JSONDecoder().decode([RecordedSample].self, from: data) else { return [] }
+        return samples
     }
 
     // MARK: - Delete
@@ -116,88 +281,59 @@ class MeasurementStore: ObservableObject {
         assert(Thread.isMainThread, "MeasurementStore.delete must be called on main thread")
         guard let idx = measurements.firstIndex(where: { $0.id == id }) else { return false }
         let m = measurements[idx]
-        for file in m.rawDataFiles {
-            try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(file))
-        }
-        measurements.remove(at: idx)
-        return saveIndex()
-    }
 
-    /// Batch-delete multiple measurements in one index write.
-    @discardableResult
-    func deleteBatch(_ ids: Set<UUID>) -> Bool {
-        assert(Thread.isMainThread, "MeasurementStore.deleteBatch must be called on main thread")
-        for id in ids {
-            guard let idx = measurements.firstIndex(where: { $0.id == id }) else { continue }
-            let m = measurements[idx]
+        do {
+            try db.dbQueue.write { db in
+                try db.execute(sql: "DELETE FROM measurement WHERE id = ?", arguments: [id.uuidString])
+            }
             for file in m.rawDataFiles {
                 try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(file))
             }
             measurements.remove(at: idx)
-        }
-        return saveIndex()
-    }
-
-    // MARK: - Persistence
-
-    /// Persist the current in-memory measurements to disk.
-    /// Normally called internally; exposed for batch mutation patterns.
-    @discardableResult
-    func saveIndex() -> Bool {
-        assert(Thread.isMainThread, "MeasurementStore.saveIndex must be called on main thread")
-        do {
-            let data = try JSONEncoder().encode(measurements)
-            try data.write(to: indexURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
             return true
         } catch {
-            print("Failed to save measurement index: \(error)")
+            print("Failed to delete measurement: \(error)")
             return false
         }
     }
 
-    private func loadIndex() {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: indexURL.path) {
-            do {
-                let data = try Data(contentsOf: indexURL)
-                measurements = try JSONDecoder().decode([SensorMeasurement].self, from: data)
-                return
-            } catch let error as NSError where error.domain == NSCocoaErrorDomain {
-                // IO error — file may be healthy but temporarily inaccessible; don't touch it
-                measurements = []
-                return
-            } catch {
-                // JSON decode failure — genuinely corrupt; back it up
-                let backupURL = indexURL.deletingLastPathComponent()
-                    .appendingPathComponent("measurements_corrupt_\(Int(Date().timeIntervalSince1970)).json")
-                try? fm.moveItem(at: indexURL, to: backupURL)
-            }
-        }
+    @discardableResult
+    func deleteBatch(_ ids: Set<UUID>) -> Bool {
+        assert(Thread.isMainThread, "MeasurementStore.deleteBatch must be called on main thread")
 
-        if let restored = latestBackupMeasurements() {
-            measurements = restored
-            saveIndex()
-        } else {
-            measurements = []
-            corruptDataDetected = true
+        do {
+            try db.dbQueue.write { db in
+                for id in ids {
+                    try db.execute(sql: "DELETE FROM measurement WHERE id = ?", arguments: [id.uuidString])
+                }
+            }
+            for id in ids {
+                if let idx = measurements.firstIndex(where: { $0.id == id }) {
+                    let m = measurements[idx]
+                    for file in m.rawDataFiles {
+                        try? FileManager.default.removeItem(at: storageDir.appendingPathComponent(file))
+                    }
+                    measurements.remove(at: idx)
+                }
+            }
+            return true
+        } catch {
+            print("Failed to delete batch: \(error)")
+            return false
         }
     }
 
-    private func latestBackupMeasurements() -> [SensorMeasurement]? {
-        let dir = indexURL.deletingLastPathComponent()
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return nil }
-        let backups = files
-            .filter { $0.hasPrefix("measurements_corrupt_") && $0.hasSuffix(".json") }
-            .sorted(by: >)
-        for name in backups {
-            let url = dir.appendingPathComponent(name)
-            if let data = try? Data(contentsOf: url),
-               let decoded = try? JSONDecoder().decode([SensorMeasurement].self, from: data),
-               !decoded.isEmpty {
-                try? FileManager.default.removeItem(at: url)
-                return decoded
+    // MARK: - SQL Helpers (used by MetricIndex and other query layers)
+
+    /// Execute a read query and return DataPoints. For use by MetricIndex.
+    func queryDataPoints(sql: String, arguments: StatementArguments = StatementArguments()) -> [DataPoint] {
+        do {
+            return try db.dbQueue.read { db in
+                try DataPointRecord.fetchAll(db, sql: sql, arguments: arguments).map { $0.toModel() }
             }
+        } catch {
+            AppLogger.storage.error("Query failed: \(error.localizedDescription)")
+            return []
         }
-        return nil
     }
 }
