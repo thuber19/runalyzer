@@ -30,12 +30,6 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
     @Published var scaleState: ScaleState = .idle
     @Published var liveWeight: Double = 0
     @Published var isStable = false
-    @Published var lastMeasurement: ScaleMeasurement? {
-        didSet { persistLastMeasurement() }
-    }
-
-    // M7: persist last measurement for dashboard display cache
-    private static let lastMeasurementKey = "runalyzer_last_scale_measurement"
 
     // MARK: - BLE
 
@@ -65,18 +59,7 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
         self.peripheral = peripheral
         self.id = peripheral.identifier
         self.displayName = peripheral.name ?? "QN-Scale"
-        // M7: restore last measurement from UserDefaults (display cache only)
-        if let data = UserDefaults.standard.data(forKey: Self.lastMeasurementKey),
-           let measurement = try? JSONDecoder().decode(ScaleMeasurement.self, from: data) {
-            _lastMeasurement = Published(initialValue: measurement)
-        }
         super.init()
-    }
-
-    private func persistLastMeasurement() {
-        guard let m = lastMeasurement,
-              let data = try? JSONEncoder().encode(m) else { return }
-        UserDefaults.standard.set(data, forKey: Self.lastMeasurementKey)
     }
 
     // MARK: - DeviceDriver lifecycle
@@ -226,24 +209,17 @@ class QNScaleDriver: NSObject, DeviceDriver, ObservableObject {
         guard !stableWeights.isEmpty, !measurementFinalized else { return }
         measurementFinalized = true
 
-        let weight = median(stableWeights)
-        let hasImpedance = !stableImpedances.isEmpty
-        let impedance = hasImpedance ? median(stableImpedances) : 0
-
-        let profile = UserProfile.load()
-        let measurement = ScaleMeasurement.from(
-            weightKg: weight,
-            impedanceOhm: impedance,
-            hasImpedance: hasImpedance,
-            profile: profile,
+        let reading = ScaleReading(
+            weightKg: median(stableWeights),
+            impedanceOhm: stableImpedances.isEmpty ? 0 : median(stableImpedances),
+            hasImpedance: !stableImpedances.isEmpty,
             deviceName: displayName
         )
 
-        lastMeasurement = measurement
         scaleState = .complete
 
-        events.send(.measurementReady(measurement))
-        events.send(.status(hasImpedance ? "Measurement complete" : "Weight only — no impedance (bare feet required)"))
+        events.send(.measurementReady(reading))
+        events.send(.status(reading.hasImpedance ? "Measurement complete" : "Weight only — no impedance (bare feet required)"))
 
         // Reset for next measurement
         stableWeights.removeAll()

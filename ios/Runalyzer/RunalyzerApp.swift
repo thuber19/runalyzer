@@ -13,6 +13,7 @@ struct RunalyzerApp: App {
     @StateObject private var healthKit = HealthKitManager()
     @StateObject private var appWiring = AppWiring()
     @StateObject private var sourcePrefs = SourcePreferenceStore()
+    @StateObject private var profileProvider: UserProfileProvider
 
     @State private var databaseFailed = false
 
@@ -28,6 +29,7 @@ struct RunalyzerApp: App {
         }
         _store = StateObject(wrappedValue: MeasurementStore())
         _workoutStore = StateObject(wrappedValue: WorkoutStore())
+        _profileProvider = StateObject(wrappedValue: UserProfileProvider())
     }
 
     var body: some Scene {
@@ -40,11 +42,13 @@ struct RunalyzerApp: App {
                 .environmentObject(appWiring)
                 .environmentObject(sourcePrefs)
                 .environmentObject(workoutStore)
+                .environmentObject(profileProvider)
                 .onAppear {
                     healthKit.requestAuthorization()
+                    profileProvider.autoFillFromHealthKit()
                     appWiring.setup(coordinator: coordinator, metrics: metrics,
                                    store: store, workoutStore: workoutStore,
-                                   healthKit: healthKit)
+                                   healthKit: healthKit, profileProvider: profileProvider)
                 }
                 .alert("Database Error", isPresented: $databaseFailed) {
                     Button("OK", role: .cancel) {}
@@ -63,14 +67,17 @@ class AppWiring: ObservableObject {
     private var driverCancellables: [UUID: AnyCancellable] = [:]
 
     // Measurement providers — self-contained pipelines
-    private var scaleProvider: ScaleMeasurementProvider?
+    private(set) var scaleProvider: ScaleMeasurementProvider?
     private var imuProvider: IMUMeasurementProvider?
     private(set) var recoveryProvider: RecoveryMeasurementProvider?
     private(set) var metricProvider: HealthKitMetricProvider?
 
+    private var profileProvider: UserProfileProvider?
+
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, workoutStore: WorkoutStore,
-               healthKit: HealthKitManager) {
+               healthKit: HealthKitManager, profileProvider: UserProfileProvider) {
+        self.profileProvider = profileProvider
 
         // Clear previous subscriptions (prevents duplicates if setup called multiple times)
         cancellables.removeAll()
@@ -81,7 +88,8 @@ class AppWiring: ObservableObject {
         let metricIndex = MetricIndex(store: store)
 
         // Create providers
-        scaleProvider = ScaleMeasurementProvider(measurementStore: store)
+        let profile = profileProvider
+        scaleProvider = ScaleMeasurementProvider(measurementStore: store, profileProvider: profile)
         imuProvider = IMUMeasurementProvider(workoutStore: workoutStore)
         metricProvider = HealthKitMetricProvider(healthKit: healthKit, store: store,
                                                 workoutStore: workoutStore, metricIndex: metricIndex)
@@ -181,8 +189,8 @@ class AppWiring: ObservableObject {
                 .receive(on: DispatchQueue.main)
                 .sink { event in
                     if case .measurementReady(let m) = event,
-                       let result = m as? ScaleMeasurement {
-                        scaleProvider?.handleScaleMeasurement(result, from: scale)
+                       let reading = m as? ScaleReading {
+                        scaleProvider?.handleReading(reading, from: scale)
                     }
                 }
         }

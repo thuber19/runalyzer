@@ -6,6 +6,7 @@ import Charts
 struct MeasurementDetailView: View {
     let measurement: SensorMeasurement
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var profileProvider: UserProfileProvider
     @State private var loadedDataPoints: [DataPoint]?
 
     /// DataPoints loaded on demand from SQLite.
@@ -253,7 +254,7 @@ struct MeasurementDetailView: View {
     }
 
     private func hrZoneBreakdown(_ hrSamples: [DataPoint]) -> some View {
-        let profile = UserProfile.load()
+        let profile = profileProvider.profile
         let profileZones = profile.hrZones
         let colors: [Color] = [.gray, .blue, .green, .orange, .red]
 

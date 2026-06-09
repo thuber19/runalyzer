@@ -3,6 +3,7 @@ import SwiftUI
 struct ScaleDashboardView: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var appWiring: AppWiring
 
     private var scale: QNScaleDriver? { coordinator.scaleDriver }
 
@@ -12,7 +13,7 @@ struct ScaleDashboardView: View {
                 VStack(spacing: 16) {
                     connectionStatus
                     liveReading
-                    if let m = scale?.lastMeasurement {
+                    if let m = appWiring.scaleProvider?.lastMeasurement {
                         bodyCompCard(m)
                     }
                     recentMeasurements

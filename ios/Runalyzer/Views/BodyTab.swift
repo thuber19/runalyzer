@@ -5,6 +5,7 @@ import UIKit
 struct BodyTab: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var appWiring: AppWiring
 
     private var scale: QNScaleDriver? { coordinator.scaleDriver }
 
@@ -63,7 +64,7 @@ struct BodyTab: View {
                 Text("Done!")
                     .font(.title2.bold())
                     .foregroundColor(.green)
-                if let w = scale?.lastMeasurement?.weightKg {
+                if let w = appWiring.scaleProvider?.lastMeasurement?.weightKg {
                     Text(String(format: "%.2f kg", w))
                         .font(.title3.monospacedDigit())
                 }

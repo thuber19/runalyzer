@@ -4,6 +4,7 @@ import Charts
 /// Workout analytics: HR zones across workouts, distance by type, duration trends.
 struct WorkoutAnalyticsView: View {
     @EnvironmentObject var workoutStore: WorkoutStore
+    @EnvironmentObject var profileProvider: UserProfileProvider
     @State private var timeRange: MetricTrendView.TimeRange = .month
     @State private var activityFilter: String = "All"
 
@@ -114,7 +115,7 @@ struct WorkoutAnalyticsView: View {
     // MARK: - HR Zone Chart
 
     private var hrZoneChart: some View {
-        let profile = UserProfile.load()
+        let profile = profileProvider.profile
         let zones = profile.hrZones
         let colors: [Color] = [.gray, .blue, .green, .orange, .red]
 

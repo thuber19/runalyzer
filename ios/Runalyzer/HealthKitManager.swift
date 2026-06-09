@@ -132,7 +132,10 @@ class HealthKitManager: ObservableObject {
         for id in quantityIDs {
             if let t = HKQuantityType.quantityType(forIdentifier: id) { types.insert(t) }
         }
+        // Height for UserProfile auto-fill
+        if let height = HKQuantityType.quantityType(forIdentifier: .height) { types.insert(height) }
         types.insert(HKObjectType.workoutType())
+        // Characteristic types (sex, DOB) don't need authorization — they're always readable
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { types.insert(sleep) }
         return types
     }()

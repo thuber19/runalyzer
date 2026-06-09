@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct ScaleSettingsView: View {
-    @State private var profile = UserProfile.load()
+    @EnvironmentObject var profileProvider: UserProfileProvider
+    @State private var profile: UserProfile = .default
     @State private var saved = false
 
     var body: some View {
@@ -79,7 +80,7 @@ struct ScaleSettingsView: View {
 
             Section {
                 Button(action: {
-                    profile.save()
+                    profileProvider.save(profile)
                     saved = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
                 }) {
@@ -99,6 +100,7 @@ struct ScaleSettingsView: View {
         .scrollContentBackground(.hidden)
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle("Body Profile")
+        .onAppear { profile = profileProvider.profile }
     }
 
     private func zoneRow(_ label: String, range: String, value: Binding<Int?>, defaultValue: Int, pct: String) -> some View {
