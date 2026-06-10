@@ -1,9 +1,12 @@
 # Runalyzer
 
-A personal health device hub that connects to BLE sensors and visualizes health data. Currently supports:
+A personal health device hub that connects to BLE sensors, imports HealthKit data, and tracks health habits. Currently supports:
 
 - **IMU Gait Sensor** — 6-axis motion data for running analysis (cadence, impact, left/right asymmetry)
 - **QN Body Fat Scale** — weight + bioimpedance for body composition (fat %, muscle mass, BMI, BMR)
+- **HealthKit Integration** — heart rate, HRV, resting HR, steps, sleep stages, workouts
+- **Recovery Score** — daily readiness computed from overnight HRV and resting heart rate
+- **Health Habits** — recurring habits with flexible schedules, auto-fulfillment from workouts, and streak tracking
 
 The app is designed for multiple device types — adding new BLE sensors requires only a driver + descriptor, no changes to existing code.
 
@@ -24,23 +27,42 @@ Any QN-protocol BLE scale (sold under Renpho, Etekcity, and other brands). The a
 
 ## Architecture
 
-The app uses a multi-device BLE architecture:
-
 ```
-DeviceCoordinator (single CBCentralManager)
-├── IMUSensorDriver (gait sensor protocol)
-├── QNScaleDriver (body fat scale protocol)
-└── (future drivers)
+BLE Drivers (protocol only — no business logic)
+├── IMUSensorDriver    → emits raw IMU samples
+└── QNScaleDriver      → emits raw weight + impedance
 
-DeviceRegistry (persisted paired devices)
-MeasurementStore (unified storage for all device types)
-SessionStore (IMU sessions, backward compatible)
+Providers (own the full pipeline: trigger → data → algorithm → save)
+├── ScaleMeasurementProvider   → profile + BodyComposition algorithm → DB
+├── IMUMeasurementProvider     → RunMetrics.analyzeRecording() → DB
+├── HealthKitMetricProvider    → imports from HealthKit → DB
+├── RecoveryMeasurementProvider → RecoveryScore.compute() → DB
+├── UserProfileProvider        → HealthKit auto-fill + DB persistence
+└── HabitProvider              → auto-fulfillment from workouts + streak stats
+
+Algorithms (pure computation, no state, no I/O)
+├── BodyComposition     → BIA body comp equations
+├── RecoveryScore       → HRV/RHR recovery scoring
+├── RunMetrics          → IMU step detection + gait analysis
+└── HabitStreak         → streak + compliance computation
+
+Stores (dumb CRUD, GRDB ValueObservation for reactive updates)
+├── MeasurementStore    → metrics, body comp, derived scores
+├── WorkoutStore        → HealthKit + IMU workouts
+└── HabitStore          → habits + daily logs
+
+Database: GRDB/SQLCipher (encrypted SQLite)
+├── Encryption key stored in Keychain
+├── Tables: measurement, data_point, workout, workout_data_point,
+│           measurement_source, user_profile, habit, habit_log
+└── Export/import via sqlcipher_export
 ```
 
 Adding a new device type requires only:
 1. Create a `DeviceDriver` conforming class
 2. Create a `DeviceDescriptor`
 3. Register it in `DeviceCoordinator.registeredDevices`
+4. Create a provider that handles the driver's events
 
 ## How it works
 
@@ -51,7 +73,20 @@ Adding a new device type requires only:
 3. At 25 Hz, the flash holds about 2 hours of continuous recording
 4. When the phone reconnects after a run, the data syncs automatically over BLE
 5. The app analyzes the recording: step detection, cadence, impact per step, left/right foot classification
-6. Optionally link an Apple Health workout to compare heart rate, distance, and Apple's step count with the sensor data
+
+### Body Fat Scale
+
+1. Step on the scale — the app detects the BLE advertisement and connects automatically
+2. A measurement overlay appears on screen showing live weight and progress
+3. When the reading stabilizes, the provider fetches your profile, runs body composition algorithms, and saves to the database
+4. The overlay shows a checkmark, then navigates to the Data tab where the measurement appears
+
+### Health Habits
+
+- Define recurring habits with flexible schedules: daily, every N days, X times per week, or specific weekdays
+- Link habits to workout activity types for auto-fulfillment (e.g., "Run 3x/week" auto-checks when a Run workout is recorded)
+- Manual habits for things that can't be auto-detected (supplements, meditation, stretching)
+- Streak tracking and weekly/monthly compliance bars on the dashboard
 
 ## LED indicators
 
@@ -89,7 +124,7 @@ ios/            iOS app (SwiftUI, requires Xcode 15+)
 ### Requirements
 
 - Xcode 15+
-- iPhone running iOS 16+
+- iPhone running iOS 17+
 - Apple ID (free account works)
 
 ### Build & run
@@ -99,14 +134,22 @@ ios/            iOS app (SwiftUI, requires Xcode 15+)
 3. Add capabilities: **HealthKit**, **Background Modes** (Uses Bluetooth LE accessories)
 4. Connect your iPhone and hit Run
 
+### Dependencies
+
+- [GRDB.swift (SQLCipher fork)](https://github.com/sqlcipher/GRDB.swift) — encrypted SQLite database via SPM
+
 ### Permissions needed
 
-- Bluetooth — to communicate with the sensor
-- Health (optional) — to read workout data for comparison
+- Bluetooth — to communicate with BLE sensors
+- Health — to read heart rate, HRV, steps, sleep, workouts, height, and biological sex
+
+## Security
+
+The database is encrypted at rest using SQLCipher (AES-256). The encryption key is a randomly generated 256-bit key stored in the iOS Keychain. User profile data (height, age, sex) is stored in the encrypted database, not in UserDefaults or plaintext files.
 
 ## BLE protocol
 
-The sensor exposes one GATT service with these characteristics:
+The IMU sensor exposes one GATT service with these characteristics:
 
 Service UUID: `264f9cc7-8f8a-4aad-878a-d3615d12dccc`
 
@@ -137,18 +180,3 @@ The firmware protects recordings against data loss in several ways:
 - **Low battery shutdown**: At 10% battery, the firmware gracefully stops recording, flushes all buffered data, writes the session header, and enters deep sleep. Data is preserved and will sync on next power-up.
 - **Memory full auto-stop**: At 95% flash capacity, recording stops automatically to avoid running out of space mid-write.
 - **Power-loss recovery**: If power is lost during recording, the `isRecording` flag in the flash header persists. On reboot, the firmware resumes accepting that the session ended at the last flush point. The data up to that point is available for download.
-
-## App state management
-
-The app tracks two independent pieces of state:
-
-- `connected` — whether BLE is physically connected right now (set by CoreBluetooth callbacks, always accurate)
-- `appState` — what the user is doing: `.disconnected`, `.idle`, `.recording`, `.stopping`, `.downloading`, or `.error`
-
-These are intentionally independent. The device can be recording while the phone is disconnected (`connected = false`, `appState = .recording`). When the phone reconnects, the app reads the device status and reconciles:
-
-- Device reports `recording` → app shows Stop button
-- Device reports `hasData` → app starts auto-download
-- Device reports `idle` → app shows Start button
-
-The app also monitors the device status continuously. If the device stops recording unexpectedly (battery died, memory full), the app detects the state change and starts downloading the saved data automatically.
