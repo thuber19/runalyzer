@@ -17,11 +17,11 @@ struct HomeTab: View {
                 VStack(spacing: 12) {
                     recoveryTile
 
-                    heartTile
+                    HStack(spacing: 12) { heartTile; sleepTile }
 
-                    HStack(spacing: 12) { sleepTile; habitsTile }
+                    HStack(spacing: 12) { habitsTile; workoutsTile }
 
-                    HStack(spacing: 12) { stepsTile; workoutsTile }
+                    HStack(spacing: 12) { stepsTile; Spacer().frame(maxWidth: .infinity) }
                 }
                 .padding()
             }
@@ -88,21 +88,30 @@ struct HomeTab: View {
     // MARK: - Heart
 
     private var heartTile: some View {
-        let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
-        let rhrPoints = metricIndex.query(type: DataType.restingHeartRate, measurementType: .metric,
-                                          from: weekAgo, to: Date(), filter: sourcePrefs)
-        let hrvPoints = metricIndex.query(type: DataType.hrvSDNN, measurementType: .metric,
-                                          from: weekAgo, to: Date(), filter: sourcePrefs)
-        let latestRHR = rhrPoints.last?.value
-        // Daily average for HRV
-        var byDay: [Date: [Double]] = [:]
-        for p in hrvPoints {
-            let day = cal.startOfDay(for: p.timestamp)
-            byDay[day, default: []].append(p.value)
-        }
-        let latestHRV = byDay.keys.sorted().last.flatMap { day in
-            let vals = byDay[day]!
-            return vals.reduce(0, +) / Double(vals.count)
+        // Use all 4 metrics — same as CategoryDashboardView.heart()
+        let monthAgo = cal.date(byAdding: .day, value: -30, to: Date())!
+
+        let trend = HealthScore.heartTrend(
+            rhrDailyValues: dailyValues(metricIndex.query(
+                type: DataType.restingHeartRate, measurementType: .metric,
+                from: monthAgo, to: Date(), filter: sourcePrefs)),
+            hrvDailyValues: dailyAvgValues(metricIndex.query(
+                type: DataType.hrvSDNN, measurementType: .metric,
+                from: monthAgo, to: Date(), filter: sourcePrefs)),
+            vo2DailyValues: dailyValues(metricIndex.query(
+                type: DataType.vo2Max, measurementType: .metric,
+                from: monthAgo, to: Date(), filter: sourcePrefs)),
+            spo2DailyValues: dailyValues(metricIndex.query(
+                type: DataType.bloodOxygen, measurementType: .metric,
+                from: monthAgo, to: Date(), filter: sourcePrefs))
+        )
+
+        let trendIcon: String
+        let trendColor: Color
+        switch trend.direction {
+        case .improving: trendIcon = "arrow.up.right"; trendColor = .green
+        case .stable:    trendIcon = "arrow.right";    trendColor = .gray
+        case .declining: trendIcon = "arrow.down.right"; trendColor = .orange
         }
 
         return CustomTile {
@@ -110,30 +119,14 @@ struct HomeTab: View {
         } content: {
             VStack(alignment: .leading, spacing: 6) {
                 Text("HEART").font(.caption2).foregroundColor(.gray)
-                HStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline, spacing: 2) {
-                            Text(latestRHR.map { String(Int($0)) } ?? "--")
-                                .font(.title.bold().monospacedDigit())
-                            Text("bpm").font(.caption2).foregroundColor(.gray)
-                        }
-                        Text("RHR").font(.caption2).foregroundColor(.red)
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline, spacing: 2) {
-                            Text(latestHRV.map { String(Int($0)) } ?? "--")
-                                .font(.title.bold().monospacedDigit())
-                            Text("ms").font(.caption2).foregroundColor(.gray)
-                        }
-                        Text("HRV").font(.caption2).foregroundColor(.purple)
-                    }
-                    Spacer()
-                    if rhrPoints.count > 1 {
-                        Sparkline(values: rhrPoints.map(\.value), color: .red)
-                            .frame(width: 80, height: 24)
-                    }
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: trendIcon).font(.title3)
+                    Text(trend.direction.rawValue).font(.title3.weight(.semibold))
                 }
-                Text("7D").font(.caption2).foregroundColor(.gray.opacity(0.6))
+                .foregroundColor(trendColor)
+                Spacer()
+                Text("30D").font(.caption2).foregroundColor(.gray.opacity(0.6))
             }
         }
     }
@@ -238,5 +231,28 @@ struct HomeTab: View {
     private func formatMinutes(_ m: Double) -> String {
         let h = Int(m) / 60, min = Int(m) % 60
         return h > 0 ? String(format: "%dh %02dm", h, min) : String(format: "%dm", min)
+    }
+
+    /// One value per day (latest value for the day).
+    private func dailyValues(_ points: [DataPoint]) -> [(date: Date, value: Double)] {
+        var byDay: [Date: Double] = [:]
+        for p in points {
+            let day = cal.startOfDay(for: p.timestamp)
+            byDay[day] = p.value // last value wins
+        }
+        return byDay.keys.sorted().map { (date: $0, value: byDay[$0]!) }
+    }
+
+    /// One value per day (daily average).
+    private func dailyAvgValues(_ points: [DataPoint]) -> [(date: Date, value: Double)] {
+        var byDay: [Date: [Double]] = [:]
+        for p in points {
+            let day = cal.startOfDay(for: p.timestamp)
+            byDay[day, default: []].append(p.value)
+        }
+        return byDay.keys.sorted().map { day in
+            let vals = byDay[day]!
+            return (date: day, value: vals.reduce(0, +) / Double(vals.count))
+        }
     }
 }

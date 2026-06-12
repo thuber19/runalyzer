@@ -7,31 +7,29 @@ struct MetricDefinition: Identifiable {
     let unit: String
     let color: Color
     let aggregation: Aggregation
+    let direction: MetricTrend.MetricDirection
+    let weight: Double
 
     enum Aggregation {
         case latest       // show most recent value (RHR, SpO2)
         case dailyAverage // average per day, show latest day's avg (HRV)
         case max          // max value (steps — dedups sources)
     }
+
+    init(id: String, title: String, unit: String, color: Color,
+         aggregation: Aggregation,
+         direction: MetricTrend.MetricDirection = .higherIsBetter,
+         weight: Double = 1.0) {
+        self.id = id; self.title = title; self.unit = unit
+        self.color = color; self.aggregation = aggregation
+        self.direction = direction; self.weight = weight
+    }
 }
 
 /// Generic category dashboard showing metric tiles for a health domain.
 ///
 /// Provides the middle layer in the 3-level drill-down:
-/// Home (summary scores) → **Category dashboard** → Metric detail (MetricTrendView)
-///
-/// Usage:
-/// ```
-/// CategoryDashboardView(
-///     title: "Heart",
-///     icon: "heart.fill",
-///     color: .red,
-///     metrics: [
-///         MetricDefinition(id: DataType.restingHeartRate, title: "Resting HR", unit: "bpm", color: .red, aggregation: .latest),
-///         MetricDefinition(id: DataType.hrvSDNN, title: "HRV (SDNN)", unit: "ms", color: .purple, aggregation: .dailyAverage),
-///     ]
-/// )
-/// ```
+/// Home (composite trend) → **Category dashboard** → Metric detail (MetricTrendView)
 struct CategoryDashboardView: View {
     let title: String
     let icon: String
@@ -49,6 +47,7 @@ struct CategoryDashboardView: View {
         ScrollView {
             VStack(spacing: 12) {
                 rangePicker
+                trendHeader
                 metricGrid
             }
             .padding()
@@ -56,6 +55,110 @@ struct CategoryDashboardView: View {
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle(title)
     }
+
+    // MARK: - Trend Header
+
+    private var trendHeader: some View {
+        let trend = computeTrend()
+        let trendIcon: String
+        let trendColor: Color
+        switch trend.direction {
+        case .improving: trendIcon = "arrow.up.right"; trendColor = .green
+        case .stable:    trendIcon = "arrow.right";    trendColor = .gray
+        case .declining: trendIcon = "arrow.down.right"; trendColor = .orange
+        }
+
+        return VStack(spacing: 12) {
+            // Direction + label
+            HStack(spacing: 10) {
+                Image(systemName: trendIcon)
+                    .font(.title2.bold())
+                    .foregroundColor(trendColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(trend.direction.rawValue)
+                        .font(.headline).foregroundColor(trendColor)
+                    Text("Over the last \(timeRange.rawValue)")
+                        .font(.caption2).foregroundColor(.gray)
+                }
+                Spacer()
+            }
+
+            // Per-metric breakdown
+            if !trend.metricTrends.isEmpty {
+                Divider().background(Color.gray.opacity(0.3))
+                HStack(spacing: 0) {
+                    ForEach(trend.metricTrends, id: \.metricId) { mt in
+                        let pctText = String(format: "%+.1f%%", mt.percentChange)
+                        let pctColor = metricTrendColor(mt)
+                        VStack(spacing: 2) {
+                            Text(pctText).font(.caption.bold().monospacedDigit())
+                                .foregroundColor(pctColor)
+                            Text(mt.name).font(.caption2).foregroundColor(.gray)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
+    }
+
+    /// Color for a metric trend: green if moving in the healthy direction, orange if not.
+    private func metricTrendColor(_ mt: MetricTrend) -> Color {
+        let isHealthy: Bool
+        switch mt.direction {
+        case .higherIsBetter: isHealthy = mt.percentChange >= 0
+        case .lowerIsBetter:  isHealthy = mt.percentChange <= 0
+        }
+        if abs(mt.percentChange) < 1 { return .gray }
+        return isHealthy ? .green : .orange
+    }
+
+    // MARK: - Trend Computation
+
+    private func computeTrend() -> CategoryTrend {
+        let historyStart = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) ?? Date()
+
+        var inputs: [HealthScore.MetricInput] = []
+        for metric in metrics {
+            let points = metricIndex.query(type: metric.id, measurementType: .metric,
+                                           from: historyStart, to: Date(), filter: sourcePrefs)
+            let dailyValues = toDailyValues(points, metric: metric)
+            guard !dailyValues.isEmpty else { continue }
+
+            inputs.append(HealthScore.MetricInput(
+                id: metric.id, name: metric.title,
+                direction: metric.direction, weight: metric.weight,
+                dailyValues: dailyValues
+            ))
+        }
+
+        return HealthScore.compute(metrics: inputs)
+    }
+
+    /// Aggregate raw data points into one value per day.
+    private func toDailyValues(_ points: [DataPoint],
+                                metric: MetricDefinition) -> [(date: Date, value: Double)] {
+        var byDay: [Date: [Double]] = [:]
+        for p in points {
+            let day = cal.startOfDay(for: p.timestamp)
+            byDay[day, default: []].append(p.value)
+        }
+        return byDay.keys.sorted().map { day in
+            let vals = byDay[day]!
+            let value: Double
+            switch metric.aggregation {
+            case .dailyAverage: value = vals.reduce(0, +) / Double(vals.count)
+            case .max:          value = vals.max() ?? 0
+            case .latest:       value = vals.last ?? 0
+            }
+            return (date: day, value: value)
+        }
+    }
+
+    // MARK: - Range Picker
 
     private var rangePicker: some View {
         Picker("Range", selection: $timeRange) {
@@ -67,8 +170,12 @@ struct CategoryDashboardView: View {
         .padding(.horizontal)
     }
 
+    // MARK: - Metric Grid
+
     private var metricGrid: some View {
-        let rows = stride(from: 0, to: metrics.count, by: 2).map { Array(metrics[$0..<min($0 + 2, metrics.count)]) }
+        let rows = stride(from: 0, to: metrics.count, by: 2).map {
+            Array(metrics[$0..<min($0 + 2, metrics.count)])
+        }
         return ForEach(rows, id: \.first!.id) { row in
             HStack(spacing: 12) {
                 metricTile(row[0])
@@ -86,7 +193,7 @@ struct CategoryDashboardView: View {
     private struct MetricResult {
         let value: String?
         let sparkline: [Double]
-        let change: Double? // percentage change (first half → second half of period)
+        let change: Double?
     }
 
     private func metricTile(_ metric: MetricDefinition) -> some View {
@@ -98,7 +205,12 @@ struct CategoryDashboardView: View {
 
         let badge: DashboardTile<MetricTrendView>.Badge? = result.change.map { pct in
             let text = String(format: "%+.1f%%", pct)
-            let color: Color = abs(pct) < 1 ? .gray : (pct >= 0 ? .green : .orange)
+            let isHealthy: Bool
+            switch metric.direction {
+            case .higherIsBetter: isHealthy = pct >= 0
+            case .lowerIsBetter:  isHealthy = pct <= 0
+            }
+            let color: Color = abs(pct) < 1 ? .gray : (isHealthy ? .green : .orange)
             return .init(text: text, color: color)
         }
 
@@ -118,39 +230,18 @@ struct CategoryDashboardView: View {
 
     private func computeValue(points: [DataPoint],
                                metric: MetricDefinition) -> MetricResult {
-        let sparkline: [Double]
-        let value: String?
-
-        switch metric.aggregation {
-        case .latest:
-            value = points.last.map { String(Int($0.value)) }
-            sparkline = points.map(\.value)
-
-        case .dailyAverage:
-            var byDay: [Date: [Double]] = [:]
-            for p in points {
-                let day = cal.startOfDay(for: p.timestamp)
-                byDay[day, default: []].append(p.value)
-            }
-            let dailyAvgs = byDay.keys.sorted().map { day in
-                let vals = byDay[day]!
-                return vals.reduce(0, +) / Double(vals.count)
-            }
-            value = dailyAvgs.last.map { String(Int($0)) }
-            sparkline = dailyAvgs
-
-        case .max:
-            let maxVal = points.map(\.value).max()
-            value = maxVal.map { String(format: "%.0f", $0) }
-            sparkline = points.map(\.value)
+        // Always aggregate to daily values — ensures % change is consistent
+        // with the trend header (which also uses daily values)
+        let daily = toDailyValues(points, metric: metric)
+        let sparkline = daily.map(\.value)
+        let value: String? = sparkline.last.map {
+            metric.aggregation == .max ? String(format: "%.0f", $0) : String(Int($0))
         }
 
-        // Compute % change: average of second half vs first half of the sparkline
         let change = percentChange(sparkline)
         return MetricResult(value: value, sparkline: sparkline, change: change)
     }
 
-    /// Compare average of second half to first half of values.
     private func percentChange(_ values: [Double]) -> Double? {
         guard values.count >= 4 else { return nil }
         let mid = values.count / 2
@@ -167,7 +258,7 @@ struct CategoryDashboardView: View {
 
 extension CategoryDashboardView {
 
-    /// Heart category: RHR, HRV, HR, SpO2
+    /// Heart category: RHR, HRV, SpO2, VO2 Max
     static func heart() -> CategoryDashboardView {
         CategoryDashboardView(
             title: "Heart",
@@ -175,18 +266,22 @@ extension CategoryDashboardView {
             color: .red,
             metrics: [
                 MetricDefinition(id: DataType.restingHeartRate, title: "Resting HR",
-                                 unit: "bpm", color: .red, aggregation: .latest),
+                                 unit: "bpm", color: .red, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.30),
                 MetricDefinition(id: DataType.hrvSDNN, title: "HRV (SDNN)",
-                                 unit: "ms", color: .purple, aggregation: .dailyAverage),
+                                 unit: "ms", color: .purple, aggregation: .dailyAverage,
+                                 direction: .higherIsBetter, weight: 0.30),
                 MetricDefinition(id: DataType.bloodOxygen, title: "Blood Oxygen",
-                                 unit: "%", color: .blue, aggregation: .latest),
+                                 unit: "%", color: .blue, aggregation: .latest,
+                                 direction: .higherIsBetter, weight: 0.15),
                 MetricDefinition(id: DataType.vo2Max, title: "VO₂ Max",
-                                 unit: "mL/kg/min", color: .green, aggregation: .latest),
+                                 unit: "mL/kg/min", color: .green, aggregation: .latest,
+                                 direction: .higherIsBetter, weight: 0.25),
             ]
         )
     }
 
-    /// Activity category: Steps, Distance, Calories
+    /// Activity category: Steps, Distance
     static func activity() -> CategoryDashboardView {
         CategoryDashboardView(
             title: "Activity",
@@ -194,9 +289,11 @@ extension CategoryDashboardView {
             color: .green,
             metrics: [
                 MetricDefinition(id: DataType.steps, title: "Steps",
-                                 unit: "steps", color: .green, aggregation: .max),
+                                 unit: "steps", color: .green, aggregation: .max,
+                                 direction: .higherIsBetter, weight: 0.6),
                 MetricDefinition(id: DataType.distance, title: "Distance",
-                                 unit: "m", color: .orange, aggregation: .max),
+                                 unit: "m", color: .orange, aggregation: .max,
+                                 direction: .higherIsBetter, weight: 0.4),
             ]
         )
     }

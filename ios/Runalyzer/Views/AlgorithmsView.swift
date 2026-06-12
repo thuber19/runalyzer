@@ -136,6 +136,41 @@ struct AlgorithmsView: View {
                 )
             }
 
+            // Health Category Trends
+            Section("Health Category Trends (from Apple Watch)") {
+                AlgorithmCard(
+                    name: "Composite Health Trend",
+                    id: "health_trend_v1",
+                    inputs: "Daily metric values over the selected period (e.g. 30D of RHR, HRV, VO₂ Max, SpO₂)",
+                    output: "Improving / Stable / Declining direction, per-metric % change, composite magnitude",
+                    method: """
+                    Determines whether a category of health metrics is improving, stable, or \
+                    declining over the selected time period. Adapted from HRV4Training's \
+                    physiological trend detection (Marco Altini).
+
+                    For each metric:
+                    1. Fit a least-squares linear regression over the period → slope (value/day)
+                    2. Multiply slope × period length → total value change
+                    3. Normalize by the metric's standard deviation → unit-free SD change
+                    4. Orient so positive = healthier (flip sign for "lower is better" metrics like RHR)
+                    5. Compute simple % change (second half avg vs first half avg) for display
+
+                    Composite: weighted average of oriented normalized slopes.
+                    Direction thresholds: |magnitude| > 0.3 SD → Improving/Declining, else Stable.
+
+                    Heart category weights: RHR 0.30, HRV 0.30, VO₂ Max 0.25, SpO₂ 0.15.
+                    RHR is the primary HR-level metric — sleeping HR and walking HR are \
+                    strongly correlated and excluded to avoid triple-counting the same signal.
+
+                    Key design choice: uses the metric's own SD for normalization, so a \
+                    "1 SD improvement in RHR" is comparable to a "1 SD improvement in HRV" \
+                    despite RHR having ~5× less natural variance than HRV.
+                    """,
+                    citation: "Altini M. Automatically detected physiological trend: how are you coping with your training? HRV4Training, 2020. | AHA Life's Essential 8, Circulation 2022.",
+                    journal: "hrv4training.com | ahajournals.org/doi/10.1161/CIR.0000000000001078"
+                )
+            }
+
             // IMU Analysis
             Section("Gait Analysis (from IMU Sensor)") {
                 AlgorithmCard(
