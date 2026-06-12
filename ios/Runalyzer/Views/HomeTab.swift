@@ -228,27 +228,23 @@ struct HomeTab: View {
             guard let end = p.endTimestamp else { return nil }
             return (p.unit, end.timeIntervalSince(p.timestamp) / 60)
         }
-        let sleepMin = stages.filter { ["Deep", "Core", "REM", "Asleep"].contains($0.0) }
+        let asleepMin = stages.filter { ["Deep", "Core", "REM", "Asleep"].contains($0.0) }
             .reduce(0) { $0 + $1.1 }
-        let deepMin = stages.filter { $0.0 == "Deep" }.reduce(0) { $0 + $1.1 }
-        let remMin = stages.filter { $0.0 == "REM" }.reduce(0) { $0 + $1.1 }
+        let awakeMin = stages.filter { $0.0 == "Awake" }.reduce(0) { $0 + $1.1 }
+        let inBedMin = asleepMin + awakeMin
 
         return tile {
             VStack(alignment: .leading, spacing: 8) {
                 Text("LAST NIGHT").font(.caption2).foregroundColor(.gray)
-                if sleepMin > 0 {
-                    HStack(spacing: 16) {
+                if asleepMin > 0 {
+                    HStack(spacing: 20) {
                         VStack(alignment: .leading) {
-                            Text(formatMinutes(sleepMin)).font(.title2.bold().monospacedDigit())
-                            Text("Asleep").font(.caption2).foregroundColor(.gray)
+                            Text(formatMinutes(inBedMin)).font(.title2.bold().monospacedDigit())
+                            Text("In Bed").font(.caption2).foregroundColor(.gray)
                         }
                         VStack(alignment: .leading) {
-                            Text(formatMinutes(deepMin)).font(.headline.monospacedDigit())
-                            Text("Deep").font(.caption2).foregroundColor(.indigo)
-                        }
-                        VStack(alignment: .leading) {
-                            Text(formatMinutes(remMin)).font(.headline.monospacedDigit())
-                            Text("REM").font(.caption2).foregroundColor(.cyan)
+                            Text(formatMinutes(asleepMin)).font(.title2.bold().monospacedDigit())
+                            Text("Asleep").font(.caption2).foregroundColor(.cyan)
                         }
                     }
                 } else {
@@ -329,7 +325,7 @@ struct HomeTab: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("WORKOUTS").font(.caption2).foregroundColor(.gray)
                 Text("\(recentWorkouts.count)").font(.title.bold().monospacedDigit())
-                Text(String(format: "%.0fm this week", totalMinutes))
+                Text("\(formatMinutes(totalMinutes)) this week")
                     .font(.caption2).foregroundColor(.gray)
             }
         }

@@ -10,7 +10,17 @@ struct SleepTrendView: View {
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
     private let cal = Calendar.current
 
-    private var sleepNights: [(date: Date, deep: Double, core: Double, rem: Double, awake: Double)] {
+    private struct SleepNight: Identifiable {
+        let id: Date
+        var date: Date { id }
+        let deep: Double
+        let core: Double
+        let rem: Double
+        let awake: Double
+        let stages: [(stage: String, start: Date, end: Date)]
+    }
+
+    private var sleepNights: [SleepNight] {
         guard let start = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) else { return [] }
         let points = metricIndex.query(type: DataType.sleepStage, measurementType: .metric,
                                        from: start, to: Date(), filter: sourcePrefs)
@@ -35,8 +45,14 @@ struct SleepTrendView: View {
                     return end.timeIntervalSince(p.timestamp) / 60
                 }.reduce(0, +)
             }
-            return (date: day, deep: minutes(for: "Deep"), core: minutes(for: "Core"),
-                    rem: minutes(for: "REM"), awake: minutes(for: "Awake"))
+            let stageIntervals = dps.compactMap { p -> (stage: String, start: Date, end: Date)? in
+                guard let end = p.endTimestamp else { return nil }
+                return (stage: p.unit, start: p.timestamp, end: end)
+            }.sorted { $0.start < $1.start }
+
+            return SleepNight(id: day, deep: minutes(for: "Deep"), core: minutes(for: "Core"),
+                              rem: minutes(for: "REM"), awake: minutes(for: "Awake"),
+                              stages: stageIntervals)
         }
     }
 
@@ -72,7 +88,7 @@ struct SleepTrendView: View {
     }
 
     private var sleepChart: some View {
-        Chart(sleepNights, id: \.date) { night in
+        Chart(sleepNights) { night in
             BarMark(x: .value("Date", night.date, unit: .day), y: .value("Deep", night.deep / 60))
                 .foregroundStyle(Color.indigo)
             BarMark(x: .value("Date", night.date, unit: .day), y: .value("Core", night.core / 60))
@@ -116,20 +132,25 @@ struct SleepTrendView: View {
 
     private var nightList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(sleepNights.reversed(), id: \.date) { night in
+            ForEach(sleepNights.reversed()) { night in
                 let total = night.deep + night.core + night.rem
-                HStack {
-                    Text(MetricAggregator.formatDay(night.date))
-                        .font(.caption).foregroundColor(.gray)
-                        .frame(width: 90, alignment: .leading)
-                    Text(formatMin(total)).font(.subheadline.bold().monospacedDigit())
-                    Spacer()
-                    HStack(spacing: 8) {
-                        stageChip("D", night.deep, .indigo)
-                        stageChip("C", night.core, .blue)
-                        stageChip("R", night.rem, .cyan)
+                NavigationLink(destination: SleepNightDetailView(date: night.date, stages: night.stages)) {
+                    HStack {
+                        Text(MetricAggregator.formatDay(night.date))
+                            .font(.caption).foregroundColor(.gray)
+                            .frame(width: 90, alignment: .leading)
+                        Text(formatMin(total)).font(.subheadline.bold().monospacedDigit())
+                        Spacer()
+                        HStack(spacing: 8) {
+                            stageChip("D", night.deep, .indigo)
+                            stageChip("C", night.core, .blue)
+                            stageChip("R", night.rem, .cyan)
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundColor(.gray)
                     }
                 }
+                .buttonStyle(.plain)
                 .padding(.horizontal).padding(.vertical, 8)
                 Divider().background(Color.gray.opacity(0.2)).padding(.leading)
             }
