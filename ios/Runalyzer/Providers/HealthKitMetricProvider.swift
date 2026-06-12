@@ -89,7 +89,7 @@ class HealthKitMetricProvider {
             guard let self, let store = self.store else { completion(); return }
 
             // For cumulative metrics (steps), aggregate per day instead of storing each sample
-            let isCumulative = (identifier == .stepCount)
+            let isCumulative = (identifier == .stepCount || identifier == .distanceWalkingRunning)
 
             var byDay: [Date: [(value: Double, timestamp: Date, sourceName: String)]] = [:]
             for s in samples {
