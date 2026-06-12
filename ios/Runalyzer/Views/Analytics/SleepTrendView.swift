@@ -14,7 +14,7 @@ struct SleepTrendView: View {
     struct SleepNight: Identifiable {
         let id: Date
         var date: Date { id }
-        let inBed: Double   // minutesye
+        let inBed: Double   // minutesyeI am 
         let deep: Double
         let core: Double
         let rem: Double
@@ -50,6 +50,7 @@ struct SleepTrendView: View {
         }
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle("Sleep")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear { loadNights() }
         .onChange(of: timeRange) { _ in loadNights() }
     }

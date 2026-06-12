@@ -64,6 +64,7 @@ struct IntradayView: View {
         }
         .background(Color.appBackground)
         .navigationTitle(MetricAggregator.formatDay(date))
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear { loadPoints() }
     }
 

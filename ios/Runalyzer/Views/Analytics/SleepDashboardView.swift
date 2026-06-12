@@ -47,6 +47,7 @@ struct SleepDashboardView: View {
         }
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle("Sleep")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Data
@@ -90,72 +91,70 @@ struct SleepDashboardView: View {
 
         let scoreColor = sleepScoreColor(score.total)
 
+        let coreMin = lastNight.asleep - lastNight.deep - lastNight.rem
+        let eff = lastNight.inBed > 0 ? lastNight.asleep / lastNight.inBed * 100 : 0
+
         return AnyView(VStack(spacing: 12) {
-            // Score card
-            HStack(spacing: 16) {
-                scoreRing(score.total, color: scoreColor, size: 64)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(score.label).font(.headline).foregroundColor(scoreColor)
-                    HStack(spacing: 12) {
-                        miniStat("Duration", score.durationScore, 50)
-                        miniStat("Consistency", score.consistencyScore, 30)
-                        miniStat("Interruptions", score.interruptionScore, 20)
+            // Card 1: Score + key stats
+            VStack(spacing: 14) {
+                HStack(spacing: 16) {
+                    scoreRing(score.total, color: scoreColor, size: 64)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(score.label).font(.headline).foregroundColor(scoreColor)
+                        HStack(spacing: 12) {
+                            miniStat("Duration", score.durationScore, 50)
+                            miniStat("Consistency", score.consistencyScore, 30)
+                            miniStat("Interruptions", score.interruptionScore, 20)
+                        }
                     }
+                    Spacer()
                 }
-                Spacer()
+                Divider().background(Color.gray.opacity(0.2))
+                HStack(spacing: 0) {
+                    statCol(bt.map { formatTime($0) } ?? "--", "Bedtime")
+                    statCol(formatMin(lastNight.inBed), "In Bed")
+                    statCol(formatMin(lastNight.asleep), "Asleep")
+                    statCol(String(format: "%.0f%%", eff), "Efficiency")
+                }
             }
             .padding()
             .background(Color(hex: 0x16213e))
             .cornerRadius(12)
 
-            // Stages
-            HStack(spacing: 0) {
-                statCol(formatMin(lastNight.asleep), "Asleep")
-                statCol(formatMin(lastNight.deep), "Deep", .indigo)
-                statCol(formatMin(lastNight.rem), "REM", .cyan)
-                statCol(formatMin(lastNight.awake), "Awake")
+            // Card 2: Stages + percentages + hypnogram
+            let deepPct = lastNight.asleep > 0 ? lastNight.deep / lastNight.asleep * 100 : 0
+            let corePct = lastNight.asleep > 0 ? max(0, coreMin) / lastNight.asleep * 100 : 0
+            let remPct = lastNight.asleep > 0 ? lastNight.rem / lastNight.asleep * 100 : 0
+
+            VStack(spacing: 12) {
+                HStack(spacing: 0) {
+                    stageColFull(formatMin(lastNight.deep), String(format: "%.0f%%", deepPct), "Deep", "13–23%", .indigo)
+                    stageColFull(formatMin(max(0, coreMin)), String(format: "%.0f%%", corePct), "Core", "", .blue)
+                    stageColFull(formatMin(lastNight.rem), String(format: "%.0f%%", remPct), "REM", "20–25%", .cyan)
+                    stageColFull(formatMin(lastNight.awake), "", "Awake", "", .gray)
+                }
+
+                if !lastNight.stages.isEmpty {
+                    IntervalTimeline(
+                        intervals: lastNight.stages.map {
+                            TimelineInterval(category: $0.stage, start: $0.start, end: $0.end)
+                        },
+                        categories: [
+                            TimelineCategory(name: "Deep", color: .indigo, position: 0),
+                            TimelineCategory(name: "Core", color: .blue, position: 1),
+                            TimelineCategory(name: "REM", color: .cyan, position: 2),
+                            TimelineCategory(name: "Awake", color: .gray, position: 3),
+                        ]
+                    )
+                    .frame(height: 130)
+                }
             }
             .padding()
             .background(Color(hex: 0x16213e))
             .cornerRadius(12)
 
-            // Bedtime & efficiency
-            VStack(alignment: .leading, spacing: 8) {
-                Text("DETAILS").font(.caption2).foregroundColor(.gray)
-                detailRow("Bedtime", bt.map { formatTime($0) } ?? "--",
-                          subtitle: "Avg: \(avgBedtimeStr)")
-                detailRow("Time in Bed", formatMin(lastNight.inBed))
-                detailRow("Efficiency",
-                          String(format: "%.0f%%", lastNight.inBed > 0 ? lastNight.asleep / lastNight.inBed * 100 : 0),
-                          subtitle: "> 85% is good")
-                detailRow("Deep %",
-                          String(format: "%.0f%%", lastNight.asleep > 0 ? lastNight.deep / lastNight.asleep * 100 : 0),
-                          subtitle: "13–23% is typical")
-                detailRow("REM %",
-                          String(format: "%.0f%%", lastNight.asleep > 0 ? lastNight.rem / lastNight.asleep * 100 : 0),
-                          subtitle: "20–25% is typical")
-            }
-            .padding()
-            .background(Color(hex: 0x16213e))
-            .cornerRadius(12)
-
-            // Daily insights
+            // Insights
             dailyInsights(score: score, night: lastNight, avgBedtimes: recentBedtimes)
-
-            // Hypnogram
-            if !lastNight.stages.isEmpty {
-                NavigationLink(destination: SleepNightDetailView(date: lastNight.date, stages: lastNight.stages)) {
-                    HStack {
-                        Text("View Hypnogram").font(.subheadline).foregroundColor(.cyan)
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption2).foregroundColor(.gray)
-                    }
-                    .padding()
-                    .background(Color(hex: 0x16213e))
-                    .cornerRadius(12)
-                }
-                .buttonStyle(.plain)
-            }
         })
     }
 
@@ -332,6 +331,44 @@ struct SleepDashboardView: View {
         VStack(spacing: 2) {
             Text(value).font(.subheadline.bold().monospacedDigit())
             Text(label).font(.caption2).foregroundColor(color == .white ? .gray : color)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func stageColFull(_ duration: String, _ pct: String, _ label: String,
+                              _ ref: String, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(duration).font(.subheadline.bold().monospacedDigit())
+            if !pct.isEmpty {
+                Text(pct).font(.caption2.monospacedDigit()).foregroundColor(.gray)
+            }
+            HStack(spacing: 3) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(label).font(.caption2).foregroundColor(.gray)
+            }
+            if !ref.isEmpty {
+                Text(ref).font(.system(size: 8)).foregroundColor(.gray.opacity(0.5))
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func stageCol(_ value: String, _ label: String, _ color: Color) -> some View {
+        VStack(spacing: 3) {
+            Text(value).font(.subheadline.bold().monospacedDigit())
+            HStack(spacing: 3) {
+                Circle().fill(color).frame(width: 6, height: 6)
+                Text(label).font(.caption2).foregroundColor(.gray)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func statColWithRef(_ value: String, _ label: String, _ ref: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.subheadline.bold().monospacedDigit())
+            Text(label).font(.caption2).foregroundColor(.gray)
+            Text(ref).font(.system(size: 9)).foregroundColor(.gray.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
     }

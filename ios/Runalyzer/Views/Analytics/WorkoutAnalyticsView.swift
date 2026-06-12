@@ -91,6 +91,7 @@ struct WorkoutAnalyticsView: View {
         }
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle("Workouts")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Summary Stats

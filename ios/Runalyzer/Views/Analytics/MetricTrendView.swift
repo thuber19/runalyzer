@@ -73,6 +73,7 @@ struct MetricTrendView: View {
         }
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     // MARK: - Trend Chart
