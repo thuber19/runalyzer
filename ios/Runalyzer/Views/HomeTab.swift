@@ -219,19 +219,26 @@ struct HomeTab: View {
         let filtered: [DataPoint]
         if hasStages {
             let stagedSources = Set(sleepPoints.filter { ["Core", "Deep", "REM"].contains($0.unit) }.map(\.source))
-            filtered = sleepPoints.filter { stagedSources.contains($0.source) || $0.unit == "Awake" }
+            filtered = sleepPoints.filter { stagedSources.contains($0.source) || ["Awake", "InBed"].contains($0.unit) }
         } else {
             filtered = sleepPoints
         }
 
-        let stages = filtered.compactMap { p -> (String, Double)? in
+        let rawIntervals = filtered.compactMap { p -> (stage: String, start: Date, end: Date)? in
             guard let end = p.endTimestamp else { return nil }
-            return (p.unit, end.timeIntervalSince(p.timestamp) / 60)
+            return (stage: p.unit, start: p.timestamp, end: end)
         }
-        let asleepMin = stages.filter { ["Deep", "Core", "REM", "Asleep"].contains($0.0) }
-            .reduce(0) { $0 + $1.1 }
-        let awakeMin = stages.filter { $0.0 == "Awake" }.reduce(0) { $0 + $1.1 }
-        let inBedMin = asleepMin + awakeMin
+        let merged = SleepTrendView.mergeOverlappingIntervals(rawIntervals)
+
+        func mergedMinutes(for stages: [String]) -> Double {
+            merged.filter { stages.contains($0.stage) }
+                .reduce(0) { $0 + $1.end.timeIntervalSince($1.start) / 60 }
+        }
+        let asleepMin = mergedMinutes(for: ["Deep", "Core", "REM", "Asleep"])
+        let awakeMin = mergedMinutes(for: ["Awake"])
+        // Use actual InBed samples from HealthKit if available, else fall back to asleep + awake
+        let inBedFromSamples = mergedMinutes(for: ["InBed"])
+        let inBedMin = inBedFromSamples > 0 ? inBedFromSamples : asleepMin + awakeMin
 
         return tile {
             VStack(alignment: .leading, spacing: 8) {

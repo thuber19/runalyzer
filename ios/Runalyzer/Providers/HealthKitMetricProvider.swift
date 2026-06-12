@@ -21,8 +21,9 @@ class HealthKitMetricProvider {
 
     // MARK: - Public API
 
-    /// Called on app foreground. Imports all missing metrics + intraday updates.
-    func importMissingMetrics(lookbackDays: Int = 7, completion: (() -> Void)? = nil) {
+    /// Called on app foreground. Only fetches today + yesterday (recent data).
+    /// Past days are stable and don't need re-importing.
+    func importMissingMetrics(lookbackDays: Int = 2, completion: (() -> Void)? = nil) {
         importAll(lookbackDays: lookbackDays, completion: completion)
     }
 
@@ -212,9 +213,16 @@ class HealthKitMetricProvider {
                     let sources = sourceNames.map { MeasurementSource.healthKitDevice(name: $0) }
 
                     if var existing = self.metricIndex.metricMeasurement(forDay: day, containingType: DataType.sleepStage) {
-                        // Update: replace all sleep DataPoints with fresh data from HealthKit
-                        existing.dataPoints.removeAll { $0.type == DataType.sleepStage }
-                        existing.dataPoints.append(contentsOf: dps)
+                        // Merge: dedup by (timestamp + stage) to avoid duplicates without wiping existing data
+                        let existingKeys = Set(existing.dataPoints.filter { $0.type == DataType.sleepStage }.map {
+                            "\(Int($0.timestamp.timeIntervalSince1970))-\($0.unit)"
+                        })
+                        let newPoints = dps.filter {
+                            !existingKeys.contains("\(Int($0.timestamp.timeIntervalSince1970))-\($0.unit)")
+                        }
+                        guard !newPoints.isEmpty else { continue }
+                        existing.dataPoints.append(contentsOf: newPoints)
+                        existing.dataPoints.sort { $0.timestamp < $1.timestamp }
                         store.update(existing)
                     } else {
                         let measurement = SensorMeasurement(
