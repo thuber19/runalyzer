@@ -29,10 +29,19 @@ struct MetricTrendView: View {
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
     private let cal = Calendar.current
 
+    /// Whether raw values need scaling (e.g. blood oxygen stored as 0–1 fraction).
+    private var displayMultiplier: Double {
+        metricType == DataType.bloodOxygen ? 100 : 1
+    }
+
     private var dataPoints: [DataPoint] {
         guard let start = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) else { return [] }
         // Query across ALL measurement types, filtered to enabled sources
-        return metricIndex.query(type: metricType, from: start, to: Date(), filter: sourcePrefs)
+        let raw = metricIndex.query(type: metricType, from: start, to: Date(), filter: sourcePrefs)
+        guard displayMultiplier != 1 else { return raw }
+        return raw.map { DataPoint(timestamp: $0.timestamp, endTimestamp: $0.endTimestamp,
+                                   type: $0.type, value: $0.value * displayMultiplier,
+                                   unit: $0.unit, source: $0.source, role: $0.role) }
     }
 
     private var aggregates: [MetricAggregator.DailyAggregate] {

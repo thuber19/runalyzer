@@ -68,6 +68,10 @@ struct IntradayView: View {
         .onAppear { loadPoints() }
     }
 
+    private var displayMultiplier: Double {
+        metricType == DataType.bloodOxygen ? 100 : 1
+    }
+
     private func loadPoints() {
         guard !isLoaded else { return }
         let cal = Calendar.current
@@ -76,7 +80,13 @@ struct IntradayView: View {
         let metricIndex = MetricIndex(store: measurementStore)
         let raw = metricIndex.query(type: metricType, measurementType: .metric,
                                     from: dayStart, to: dayEnd, filter: sourcePrefs)
-        points = raw
+        if displayMultiplier != 1 {
+            points = raw.map { DataPoint(timestamp: $0.timestamp, endTimestamp: $0.endTimestamp,
+                                         type: $0.type, value: $0.value * displayMultiplier,
+                                         unit: $0.unit, source: $0.source, role: $0.role) }
+        } else {
+            points = raw
+        }
         isLoaded = true
     }
 
