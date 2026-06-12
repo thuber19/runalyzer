@@ -209,20 +209,28 @@ enum SleepScore {
         let asleepMin = deepMin + coreMin + remMin
         let bedtime = earliestSleep ?? Date()
 
-        // Average bedtime from recent nights
+        // Median bedtime from recent nights (robust to outliers)
         let avgBedtime: Date? = {
             guard recentBedtimes.count >= 3 else { return nil }
             let cal = Calendar.current
-            // Average time-of-day in minutes, handling midnight crossing
-            let minutesOfDay = recentBedtimes.map { date -> Double in
+            let minutesOfDay = recentBedtimes.compactMap { date -> Double? in
                 let comps = cal.dateComponents([.hour, .minute], from: date)
-                var mins = Double((comps.hour ?? 0) * 60 + (comps.minute ?? 0))
-                // Shift late evening times to be > 1440 so averaging works across midnight
+                let hour = comps.hour ?? 0
+                if hour >= 6 && hour < 18 { return nil } // skip daytime (naps)
+                var mins = Double(hour * 60 + (comps.minute ?? 0))
                 if mins < 720 { mins += 1440 }
                 return mins
             }
-            let avgMins = Int(minutesOfDay.reduce(0, +) / Double(minutesOfDay.count)) % 1440
-            return cal.date(bySettingHour: avgMins / 60, minute: avgMins % 60, second: 0, of: Date())
+            guard minutesOfDay.count >= 3 else { return nil }
+            let sorted = minutesOfDay.sorted()
+            let median: Double
+            if sorted.count % 2 == 0 {
+                median = (sorted[sorted.count / 2 - 1] + sorted[sorted.count / 2]) / 2
+            } else {
+                median = sorted[sorted.count / 2]
+            }
+            let result = Int(median) % 1440
+            return cal.date(bySettingHour: result / 60, minute: result % 60, second: 0, of: Date())
         }()
 
         return compute(NightInput(

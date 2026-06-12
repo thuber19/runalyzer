@@ -14,7 +14,7 @@ struct SleepTrendView: View {
     struct SleepNight: Identifiable {
         let id: Date
         var date: Date { id }
-        let inBed: Double   // minutes
+        let inBed: Double   // minutesye
         let deep: Double
         let core: Double
         let rem: Double

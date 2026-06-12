@@ -190,6 +190,81 @@ enum HealthScore {
         return compute(metrics: inputs)
     }
 
+    // MARK: - Convenience: Sleep Trend
+
+    /// Compute sleep trend from nightly sleep scores and component metrics.
+    ///
+    /// Weights: Sleep score 0.40, Duration 0.25, Deep % 0.20, Consistency 0.15
+    static func sleepTrend(
+        sleepScores: [(date: Date, value: Double)] = [],
+        durationValues: [(date: Date, value: Double)] = [],
+        deepPercentValues: [(date: Date, value: Double)] = [],
+        efficiencyValues: [(date: Date, value: Double)] = []
+    ) -> CategoryTrend {
+        var inputs: [MetricInput] = []
+
+        if sleepScores.count >= minDataPoints {
+            inputs.append(MetricInput(
+                id: "sleep_score", name: "Sleep Score",
+                direction: .higherIsBetter, weight: 0.40,
+                dailyValues: sleepScores))
+        }
+        if durationValues.count >= minDataPoints {
+            inputs.append(MetricInput(
+                id: "sleep_duration", name: "Duration",
+                direction: .higherIsBetter, weight: 0.25,
+                dailyValues: durationValues))
+        }
+        if deepPercentValues.count >= minDataPoints {
+            inputs.append(MetricInput(
+                id: "deep_percent", name: "Deep %",
+                direction: .higherIsBetter, weight: 0.20,
+                dailyValues: deepPercentValues))
+        }
+        if efficiencyValues.count >= minDataPoints {
+            inputs.append(MetricInput(
+                id: "sleep_efficiency", name: "Efficiency",
+                direction: .higherIsBetter, weight: 0.15,
+                dailyValues: efficiencyValues))
+        }
+
+        return compute(metrics: inputs)
+    }
+
+    // MARK: - Convenience: Activity Trend
+
+    /// Compute activity trend from daily steps and workout metrics.
+    ///
+    /// Weights: Steps 0.40, Workout duration 0.35, Distance 0.25
+    static func activityTrend(
+        stepValues: [(date: Date, value: Double)] = [],
+        workoutMinValues: [(date: Date, value: Double)] = [],
+        distanceValues: [(date: Date, value: Double)] = []
+    ) -> CategoryTrend {
+        var inputs: [MetricInput] = []
+
+        if stepValues.count >= minDataPoints {
+            inputs.append(MetricInput(
+                id: DataType.steps, name: "Steps",
+                direction: .higherIsBetter, weight: 0.40,
+                dailyValues: stepValues))
+        }
+        if workoutMinValues.count >= minDataPoints {
+            inputs.append(MetricInput(
+                id: "workout_minutes", name: "Workout Time",
+                direction: .higherIsBetter, weight: 0.35,
+                dailyValues: workoutMinValues))
+        }
+        if distanceValues.count >= minDataPoints {
+            inputs.append(MetricInput(
+                id: DataType.distance, name: "Distance",
+                direction: .higherIsBetter, weight: 0.25,
+                dailyValues: distanceValues))
+        }
+
+        return compute(metrics: inputs)
+    }
+
     // MARK: - Math
 
     /// Least-squares linear regression slope (value change per day).

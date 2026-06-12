@@ -19,9 +19,9 @@ struct HomeTab: View {
 
                     HStack(spacing: 12) { heartTile; sleepTile }
 
-                    HStack(spacing: 12) { habitsTile; workoutsTile }
+                    HStack(spacing: 12) { activityTile; habitsTile }
 
-                    HStack(spacing: 12) { stepsTile; Spacer().frame(maxWidth: .infinity) }
+                    HStack(spacing: 12) { stepsTile; workoutsTile }
                 }
                 .padding()
             }
@@ -149,18 +149,28 @@ struct HomeTab: View {
             SleepScore.fromStages(stages: $0.stages, recentBedtimes: recentBedtimes)
         }
 
-        let badge: DashboardTile<SleepTrendView>.Badge? = sleepResult.map {
-            .init(text: "\($0.total)", color: sleepScoreColor($0.total))
-        }
-
-        return DashboardTile(
-            title: "SLEEP",
-            value: lastNight.map { formatMinutes($0.asleep) } ?? "--",
-            detail: lastNight.map { formatMinutes($0.inBed) + " in bed" },
-            period: "Last night",
-            badge: badge
-        ) {
-            SleepTrendView()
+        return CustomTile {
+            SleepDashboardView()
+        } content: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("SLEEP").font(.caption2).foregroundColor(.gray)
+                if let score = sleepResult {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text("\(score.total)").font(.title.bold().monospacedDigit())
+                            .foregroundColor(sleepScoreColor(score.total))
+                        Text(score.label).font(.caption2).foregroundColor(.gray)
+                    }
+                } else {
+                    Text("--").font(.title.bold()).foregroundColor(.gray)
+                }
+                if let night = lastNight {
+                    Text(formatMinutes(night.asleep) + " asleep")
+                        .font(.caption2).foregroundColor(.gray)
+                } else {
+                    Text(" ").font(.caption2)
+                }
+                Text("Last night").font(.caption2).foregroundColor(.gray.opacity(0.6))
+            }
         }
     }
 
@@ -201,6 +211,58 @@ struct HomeTab: View {
                     }
                 }
                 Text("Today").font(.caption2).foregroundColor(.gray.opacity(0.6))
+            }
+        }
+    }
+
+    // MARK: - Activity
+
+    private var activityTile: some View {
+        let monthAgo = cal.date(byAdding: .day, value: -30, to: Date())!
+
+        let stepPoints = metricIndex.query(type: DataType.steps, measurementType: .metric,
+                                           from: monthAgo, to: Date(), filter: sourcePrefs)
+        let distPoints = metricIndex.query(type: DataType.distance, measurementType: .metric,
+                                           from: monthAgo, to: Date(), filter: sourcePrefs)
+
+        // Daily workout minutes from WorkoutStore
+        let workouts = workoutStore.workouts(from: monthAgo, to: Date())
+        var workoutByDay: [Date: Double] = [:]
+        for w in workouts {
+            let day = cal.startOfDay(for: w.startDate)
+            workoutByDay[day, default: 0] += (w.durationSec ?? 0) / 60
+        }
+        let workoutMinValues = workoutByDay.keys.sorted().map {
+            (date: $0, value: workoutByDay[$0]!)
+        }
+
+        let trend = HealthScore.activityTrend(
+            stepValues: dailyValues(stepPoints),
+            workoutMinValues: workoutMinValues,
+            distanceValues: dailyValues(distPoints)
+        )
+
+        let trendIcon: String
+        let trendColor: Color
+        switch trend.direction {
+        case .improving: trendIcon = "arrow.up.right"; trendColor = .green
+        case .stable:    trendIcon = "arrow.right";    trendColor = .gray
+        case .declining: trendIcon = "arrow.down.right"; trendColor = .orange
+        }
+
+        return CustomTile {
+            CategoryDashboardView.activity()
+        } content: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("ACTIVITY").font(.caption2).foregroundColor(.gray)
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: trendIcon).font(.title3)
+                    Text(trend.direction.rawValue).font(.title3.weight(.semibold))
+                }
+                .foregroundColor(trendColor)
+                Spacer()
+                Text("30D").font(.caption2).foregroundColor(.gray.opacity(0.6))
             }
         }
     }

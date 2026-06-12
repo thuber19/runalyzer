@@ -919,13 +919,6 @@ class HealthKitManager: ObservableObject {
             store.execute(sleepQuery)
         } else { group.leave() }
 
-        // Probe for HKScoredAssessment (Apple Sleep Score — iOS 18+ / watchOS 26+)
-        group.enter()
-        probeSleepScore(predicate: predicate) { result in
-            serialQueue.sync { outputParts.append(result) }
-            group.leave()
-        }
-
         group.notify(queue: .main) {
             completion(outputParts.joined())
         }
