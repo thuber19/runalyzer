@@ -61,7 +61,7 @@ enum MetricAggregator {
     }
 
     /// Compute period stats + trend direction.
-    /// Trend = % change from first half avg to second half avg.
+    /// Trend = % change via OLS regression line endpoints.
     static func periodStats(_ points: [DataPoint]) -> PeriodStats {
         let values = points.map(\.value)
         guard !values.isEmpty else {
@@ -69,12 +69,7 @@ enum MetricAggregator {
         }
 
         let avg = values.reduce(0, +) / Double(values.count)
-        let mid = values.count / 2
-        let firstHalf = Array(values.prefix(mid))
-        let secondHalf = Array(values.suffix(values.count - mid))
-        let firstAvg = firstHalf.isEmpty ? avg : firstHalf.reduce(0, +) / Double(firstHalf.count)
-        let secondAvg = secondHalf.isEmpty ? avg : secondHalf.reduce(0, +) / Double(secondHalf.count)
-        let trend = firstAvg > 0 ? ((secondAvg - firstAvg) / firstAvg) * 100 : 0
+        let trend = values.count >= 2 ? HealthScore.regressionPercentChange(values) : 0
 
         return PeriodStats(
             avg: avg,

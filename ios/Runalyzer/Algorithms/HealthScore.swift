@@ -106,13 +106,8 @@ enum HealthScore {
             // Orient: positive = healthier
             let orientedSlope = m.direction == .lowerIsBetter ? -normalizedSlope : normalizedSlope
 
-            // % change for display (second half avg vs first half avg)
-            let mid = m.dailyValues.count / 2
-            let firstHalf = m.dailyValues[..<mid].map(\.value)
-            let secondHalf = m.dailyValues[mid...].map(\.value)
-            let avgFirst = firstHalf.reduce(0, +) / Double(firstHalf.count)
-            let avgSecond = secondHalf.reduce(0, +) / Double(secondHalf.count)
-            let pctChange = avgFirst != 0 ? ((avgSecond - avgFirst) / avgFirst) * 100 : 0
+            // % change via regression line endpoints (more robust than split-half)
+            let pctChange = regressionPercentChange(m.dailyValues.map(\.value))
 
             metricTrends.append(MetricTrend(
                 metricId: m.id, name: m.name,
@@ -266,6 +261,34 @@ enum HealthScore {
     }
 
     // MARK: - Math
+
+    /// % change using OLS regression line endpoints: (fitted_last - fitted_first) / fitted_first × 100.
+    /// More robust than split-half comparison — uses all data points and handles noise/sparse data well.
+    static func regressionPercentChange(_ values: [Double]) -> Double {
+        let n = Double(values.count)
+        guard n >= 2 else { return 0 }
+
+        var sumX: Double = 0, sumY: Double = 0
+        var sumXY: Double = 0, sumX2: Double = 0
+
+        for (i, y) in values.enumerated() {
+            let x = Double(i)
+            sumX += x; sumY += y
+            sumXY += x * y; sumX2 += x * x
+        }
+
+        let denom = n * sumX2 - sumX * sumX
+        guard denom != 0 else { return 0 }
+
+        let slope = (n * sumXY - sumX * sumY) / denom
+        let intercept = (sumY - slope * sumX) / n
+
+        let fittedFirst = intercept           // x = 0
+        let fittedLast = intercept + slope * (n - 1) // x = n-1
+
+        guard fittedFirst != 0 else { return 0 }
+        return ((fittedLast - fittedFirst) / fittedFirst) * 100
+    }
 
     /// Least-squares linear regression slope (value change per day).
     private static func linearRegressionSlope(
