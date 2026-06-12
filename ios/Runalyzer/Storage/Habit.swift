@@ -8,10 +8,23 @@ struct Habit: Identifiable, Sendable {
     var color: String
     var scheduleType: ScheduleType
     var scheduleParam: Int
+    var category: Category
     var linkedActivityType: String?   // matches Workout.activityType for auto-fulfillment; nil = manual
     var createdAt: Date
     var archivedAt: Date?
     var sortOrder: Int
+
+    enum Category: String, Codable, CaseIterable {
+        case general
+        case supplement
+
+        var label: String {
+            switch self {
+            case .general: return "General"
+            case .supplement: return "Supplement"
+            }
+        }
+    }
 
     enum ScheduleType: String, Codable, CaseIterable {
         case daily
@@ -86,6 +99,12 @@ struct HabitLog: Identifiable, Sendable {
     var completedAt: Date?
     var autoFulfilled: Bool
     var workoutId: UUID?
+    var source: Source
+
+    enum Source: String, Codable {
+        case manual
+        case auto
+    }
 
     var isCompleted: Bool { completedAt != nil }
 }

@@ -267,6 +267,17 @@ final class AppDatabase {
                           on: "habit_log", columns: ["date"])
         }
 
+        migrator.registerMigration("v4-habit-category-source") { db in
+            try db.alter(table: "habit") { t in
+                t.add(column: "category", .text).notNull().defaults(to: "general")
+            }
+            try db.alter(table: "habit_log") { t in
+                t.add(column: "source", .text).notNull().defaults(to: "manual")
+            }
+            // Backfill: existing auto-fulfilled logs get source = "auto"
+            try db.execute(sql: "UPDATE habit_log SET source = 'auto' WHERE autoFulfilled = 1")
+        }
+
         return migrator
     }
 

@@ -266,6 +266,7 @@ struct HabitRecord: Codable, FetchableRecord, PersistableRecord {
     var color: String
     var scheduleType: String
     var scheduleParam: Int
+    var category: String
     var linkedActivityType: String?
     var createdAt: Double
     var archivedAt: Double?
@@ -278,6 +279,7 @@ struct HabitRecord: Codable, FetchableRecord, PersistableRecord {
         self.color = model.color
         self.scheduleType = model.scheduleType.rawValue
         self.scheduleParam = model.scheduleParam
+        self.category = model.category.rawValue
         self.linkedActivityType = model.linkedActivityType
         self.createdAt = model.createdAt.timeIntervalSince1970
         self.archivedAt = model.archivedAt?.timeIntervalSince1970
@@ -292,6 +294,7 @@ struct HabitRecord: Codable, FetchableRecord, PersistableRecord {
             color: color,
             scheduleType: Habit.ScheduleType(rawValue: scheduleType) ?? .daily,
             scheduleParam: scheduleParam,
+            category: Habit.Category(rawValue: category) ?? .general,
             linkedActivityType: linkedActivityType,
             createdAt: Date(timeIntervalSince1970: createdAt),
             archivedAt: archivedAt.map { Date(timeIntervalSince1970: $0) },
@@ -311,6 +314,7 @@ struct HabitLogRecord: Codable, FetchableRecord, PersistableRecord {
     var completedAt: Double?
     var autoFulfilled: Int
     var workoutId: String?
+    var source: String
 
     init(from model: HabitLog) {
         self.id = model.id == 0 ? nil : model.id
@@ -319,6 +323,7 @@ struct HabitLogRecord: Codable, FetchableRecord, PersistableRecord {
         self.completedAt = model.completedAt?.timeIntervalSince1970
         self.autoFulfilled = model.autoFulfilled ? 1 : 0
         self.workoutId = model.workoutId?.uuidString
+        self.source = model.source.rawValue
     }
 
     func toModel() -> HabitLog {
@@ -328,7 +333,8 @@ struct HabitLogRecord: Codable, FetchableRecord, PersistableRecord {
             date: Date(timeIntervalSince1970: date),
             completedAt: completedAt.map { Date(timeIntervalSince1970: $0) },
             autoFulfilled: autoFulfilled != 0,
-            workoutId: workoutId.flatMap { UUID(uuidString: $0) }
+            workoutId: workoutId.flatMap { UUID(uuidString: $0) },
+            source: HabitLog.Source(rawValue: source) ?? .manual
         )
     }
 }

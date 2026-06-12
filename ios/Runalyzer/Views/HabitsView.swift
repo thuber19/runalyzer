@@ -50,7 +50,9 @@ struct HabitsView: View {
                     .padding()
             } else {
                 ForEach(scheduled) { habit in
-                    habitRow(habit)
+                    NavigationLink(destination: HabitDetailView(habit: habit)) {
+                        habitRow(habit)
+                    }
                 }
             }
         }
@@ -65,41 +67,41 @@ struct HabitsView: View {
         let completed = log?.isCompleted ?? false
         let isAuto = log?.autoFulfilled ?? false
 
-        return Button(action: {
-            if !isAuto {
-                habitStore.toggleCompletion(habitId: habit.id)
-            }
-        }) {
-            HStack(spacing: 12) {
+        return HStack(spacing: 12) {
+            Button {
+                if !isAuto {
+                    habitStore.toggleCompletion(habitId: habit.id)
+                }
+            } label: {
                 Image(systemName: completed ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundColor(completed ? Color(hex: habit.color) : .gray)
+            }
+            .buttonStyle(.plain)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(habit.name).font(.subheadline)
-                        .strikethrough(completed, color: .gray)
-                    Text(habit.scheduleDescription)
-                        .font(.caption2).foregroundColor(.gray)
-                }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(habit.name).font(.subheadline)
+                    .strikethrough(completed, color: .gray)
+                Text(habit.scheduleDescription)
+                    .font(.caption2).foregroundColor(.gray)
+            }
 
-                Spacer()
+            Spacer()
 
-                if isAuto {
-                    Image(systemName: "bolt.fill")
+            if isAuto {
+                Image(systemName: "bolt.fill")
+                    .font(.caption2).foregroundColor(.orange)
+            }
+
+            if let s = stats[habit.id], s.currentStreak > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "flame.fill")
                         .font(.caption2).foregroundColor(.orange)
-                }
-
-                if let s = stats[habit.id], s.currentStreak > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "flame.fill")
-                            .font(.caption2).foregroundColor(.orange)
-                        Text("\(s.currentStreak)")
-                            .font(.caption2.monospacedDigit()).foregroundColor(.orange)
-                    }
+                    Text("\(s.currentStreak)")
+                        .font(.caption2.monospacedDigit()).foregroundColor(.orange)
                 }
             }
         }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Stats
@@ -110,26 +112,28 @@ struct HabitsView: View {
 
             ForEach(habitStore.habits) { habit in
                 if let s = stats[habit.id] {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Image(systemName: habit.icon)
-                                .foregroundColor(Color(hex: habit.color))
-                            Text(habit.name).font(.subheadline)
-                            Spacer()
-                            HStack(spacing: 2) {
-                                Image(systemName: "flame.fill").foregroundColor(.orange)
-                                Text("\(s.currentStreak)").font(.subheadline.bold().monospacedDigit())
+                    NavigationLink(destination: HabitDetailView(habit: habit)) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: habit.icon)
+                                    .foregroundColor(Color(hex: habit.color))
+                                Text(habit.name).font(.subheadline)
+                                Spacer()
+                                HStack(spacing: 2) {
+                                    Image(systemName: "flame.fill").foregroundColor(.orange)
+                                    Text("\(s.currentStreak)").font(.subheadline.bold().monospacedDigit())
+                                }
+                            }
+
+                            HStack(spacing: 16) {
+                                complianceBar(label: "This week", value: s.weeklyCompliance,
+                                              color: Color(hex: habit.color))
+                                complianceBar(label: "This month", value: s.monthlyCompliance,
+                                              color: Color(hex: habit.color))
                             }
                         }
-
-                        HStack(spacing: 16) {
-                            complianceBar(label: "This week", value: s.weeklyCompliance,
-                                          color: Color(hex: habit.color))
-                            complianceBar(label: "This month", value: s.monthlyCompliance,
-                                          color: Color(hex: habit.color))
-                        }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
             }
         }
@@ -167,6 +171,7 @@ struct AddHabitView: View {
     @State private var name = ""
     @State private var icon = "checkmark.circle"
     @State private var color = "4CAF50"
+    @State private var category: Habit.Category = .general
     @State private var scheduleType: Habit.ScheduleType = .daily
     @State private var scheduleParam = 1
     @State private var linkedActivityType: String?
@@ -180,9 +185,59 @@ struct AddHabitView: View {
     private let colorOptions = ["4CAF50", "2196F3", "FF9800", "E91E63",
                                  "9C27B0", "00BCD4", "FF5722", "607D8B"]
 
+    private struct SupplementPreset: Identifiable {
+        let id = UUID()
+        let name: String
+        let icon: String
+        let color: String
+    }
+
+    private let supplementPresets: [SupplementPreset] = [
+        .init(name: "Creatine", icon: "pill", color: "2196F3"),
+        .init(name: "Vitamin D", icon: "pill", color: "FF9800"),
+        .init(name: "Omega-3", icon: "pill", color: "00BCD4"),
+        .init(name: "Magnesium", icon: "pill", color: "9C27B0"),
+        .init(name: "Protein Shake", icon: "drop", color: "4CAF50"),
+        .init(name: "Multivitamin", icon: "pill", color: "E91E63"),
+        .init(name: "Iron", icon: "pill", color: "FF5722"),
+        .init(name: "B12", icon: "pill", color: "607D8B"),
+    ]
+
     var body: some View {
         NavigationStack {
             Form {
+                Section("Category") {
+                    Picker("Type", selection: $category) {
+                        ForEach(Habit.Category.allCases, id: \.self) { c in
+                            Text(c.label).tag(c)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color(hex: 0x16213e))
+                }
+
+                if category == .supplement {
+                    Section("Quick Add") {
+                        ForEach(supplementPresets) { preset in
+                            Button {
+                                name = preset.name
+                                icon = preset.icon
+                                color = preset.color
+                                scheduleType = .daily
+                                scheduleParam = 1
+                                linkedActivityType = nil
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: preset.icon)
+                                        .foregroundColor(Color(hex: preset.color))
+                                    Text(preset.name).foregroundColor(.white)
+                                }
+                            }
+                            .listRowBackground(Color(hex: 0x16213e))
+                        }
+                    }
+                }
+
                 Section("Habit") {
                     TextField("Name", text: $name)
                         .listRowBackground(Color(hex: 0x16213e))
@@ -277,6 +332,7 @@ struct AddHabitView: View {
                         let habit = Habit(
                             id: UUID(), name: name, icon: icon, color: color,
                             scheduleType: scheduleType, scheduleParam: param,
+                            category: category,
                             linkedActivityType: linkedActivityType,
                             createdAt: Date(), archivedAt: nil, sortOrder: habitStore.habits.count
                         )

@@ -143,7 +143,7 @@ class HabitStore: ObservableObject {
                 } else {
                     // Create new log entry as completed
                     try db.execute(
-                        sql: "INSERT INTO habit_log (habitId, date, completedAt, autoFulfilled) VALUES (?, ?, ?, 0)",
+                        sql: "INSERT INTO habit_log (habitId, date, completedAt, autoFulfilled, source) VALUES (?, ?, ?, 0, 'manual')",
                         arguments: [habitId.uuidString, dayStart, Date().timeIntervalSince1970])
                 }
             }
@@ -165,12 +165,12 @@ class HabitStore: ObservableObject {
                     .fetchOne(db) {
                     if existing.completedAt == nil {
                         try db.execute(
-                            sql: "UPDATE habit_log SET completedAt = ?, autoFulfilled = 1, workoutId = ? WHERE id = ?",
+                            sql: "UPDATE habit_log SET completedAt = ?, autoFulfilled = 1, workoutId = ?, source = 'auto' WHERE id = ?",
                             arguments: [Date().timeIntervalSince1970, workoutId.uuidString, existing.id])
                     }
                 } else {
                     try db.execute(
-                        sql: "INSERT INTO habit_log (habitId, date, completedAt, autoFulfilled, workoutId) VALUES (?, ?, ?, 1, ?)",
+                        sql: "INSERT INTO habit_log (habitId, date, completedAt, autoFulfilled, workoutId, source) VALUES (?, ?, ?, 1, ?, 'auto')",
                         arguments: [habitId.uuidString, dayStart, Date().timeIntervalSince1970, workoutId.uuidString])
                 }
             }
