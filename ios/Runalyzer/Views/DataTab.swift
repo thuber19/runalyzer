@@ -337,6 +337,20 @@ struct DataTab: View {
             return String(format: "%.1f°C", avg)
         case DataType.sleepStage:
             return String(format: "%d stages", count)
+        case DataType.respiratoryRate:
+            return String(format: "%.1f br/min avg · %d readings", avg, count)
+        case DataType.walkingHeartRateAvg:
+            return String(format: "%.0f bpm", avg)
+        case DataType.activeEnergy:
+            return String(format: "%.0f kcal", max)
+        case DataType.wristTemperature:
+            return String(format: "%+.1f°C deviation", avg)
+        case DataType.weight:
+            return String(format: "%.1f kg", max)
+        case DataType.bodyFatPercent:
+            return String(format: "%.1f%%", max * 100)
+        case DataType.fatFreeMassKg:
+            return String(format: "%.1f kg", max)
         default:
             return String(format: "%.1f %@ avg · %d pts", avg, unit, count)
         }
@@ -354,6 +368,13 @@ struct DataTab: View {
         case DataType.bodyTemperature:  return "Body Temperature"
         case DataType.sleepStage:       return "Sleep"
         case DataType.cadence:          return "Cadence"
+        case DataType.respiratoryRate:  return "Respiratory Rate"
+        case DataType.walkingHeartRateAvg: return "Walking Heart Rate"
+        case DataType.activeEnergy:     return "Active Energy"
+        case DataType.wristTemperature: return "Wrist Temperature"
+        case DataType.weight:           return "Weight"
+        case DataType.bodyFatPercent:   return "Body Fat"
+        case DataType.fatFreeMassKg:    return "Lean Body Mass"
         default:
             return type.replacingOccurrences(of: "_", with: " ")
                 .split(separator: " ").map { $0.prefix(1).uppercased() + $0.dropFirst() }
@@ -373,6 +394,13 @@ struct DataTab: View {
         case DataType.bodyTemperature:  return "thermometer"
         case DataType.sleepStage:       return "bed.double"
         case DataType.cadence:          return "metronome"
+        case DataType.respiratoryRate:  return "lungs.fill"
+        case DataType.walkingHeartRateAvg: return "figure.walk.circle"
+        case DataType.activeEnergy:     return "flame"
+        case DataType.wristTemperature: return "thermometer.low"
+        case DataType.weight:           return "scalemass"
+        case DataType.bodyFatPercent:   return "figure.arms.open"
+        case DataType.fatFreeMassKg:    return "figure.strengthtraining.traditional"
         default:                        return "chart.bar"
         }
     }
@@ -389,6 +417,13 @@ struct DataTab: View {
         case DataType.bodyTemperature:  return .yellow
         case DataType.sleepStage:       return .indigo
         case DataType.cadence:          return .mint
+        case DataType.respiratoryRate:  return .cyan
+        case DataType.walkingHeartRateAvg: return .orange
+        case DataType.activeEnergy:     return .red
+        case DataType.wristTemperature: return .indigo
+        case DataType.weight:           return .cyan
+        case DataType.bodyFatPercent:   return .orange
+        case DataType.fatFreeMassKg:    return .green
         default:                        return .cyan
         }
     }
@@ -403,6 +438,13 @@ struct DataTab: View {
         case DataType.vo2Max:           return "mL/kg/min"
         case DataType.bodyTemperature:  return "°C"
         case DataType.cadence:          return "spm"
+        case DataType.respiratoryRate:  return "br/min"
+        case DataType.walkingHeartRateAvg: return "bpm"
+        case DataType.activeEnergy:     return "kcal"
+        case DataType.wristTemperature: return "°C"
+        case DataType.weight:           return "kg"
+        case DataType.bodyFatPercent:   return "%"
+        case DataType.fatFreeMassKg:    return "kg"
         default:                        return ""
         }
     }

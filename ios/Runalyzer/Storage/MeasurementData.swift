@@ -335,6 +335,10 @@ enum DataType {
     static let steps            = "steps"                        // cumulative daily steps
     static let sleepStage       = "sleep_stage"                  // sleep stage (encoded as double)
     static let heartRateSample  = "heart_rate_sample"            // individual HR reading (bpm)
+    static let respiratoryRate  = "respiratory_rate"             // breaths/min (sleep-derived)
+    static let walkingHeartRateAvg = "walking_heart_rate_avg"   // bpm (daily walking average)
+    static let activeEnergy     = "active_energy"                // kcal (cumulative daily)
+    static let wristTemperature = "wrist_temperature"            // °C deviation from baseline (sleep)
 
     // HealthKit workout data points
     static let workoutType      = "workout_type"                 // activity type name (stored as string via unit)

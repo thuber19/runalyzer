@@ -46,6 +46,9 @@ class HealthKitMetricProvider {
             (.oxygenSaturation,         HKUnit.percent(), DataType.bloodOxygen),
             (.bodyTemperature,          HKUnit.degreeCelsius(), DataType.bodyTemperature),
             (.vo2Max,                   HKUnit(from: "mL/kg*min"), DataType.vo2Max),
+            (.respiratoryRate,          HKUnit(from: "count/min"), DataType.respiratoryRate),
+            (.walkingHeartRateAverage,  bpmUnit, DataType.walkingHeartRateAvg),
+            (.appleSleepingWristTemperature, HKUnit.degreeCelsius(), DataType.wristTemperature),
         ]
 
         for (identifier, unit, dataType) in quantityMetrics {
@@ -58,6 +61,7 @@ class HealthKitMetricProvider {
         let cumulativeMetrics: [(HKQuantityTypeIdentifier, HKUnit, String)] = [
             (.stepCount,              HKUnit.count(), DataType.steps),
             (.distanceWalkingRunning, HKUnit.meter(), DataType.distance),
+            (.activeEnergyBurned,     HKUnit.kilocalorie(), DataType.activeEnergy),
         ]
 
         for (identifier, unit, dataType) in cumulativeMetrics {
@@ -65,6 +69,10 @@ class HealthKitMetricProvider {
             importCumulativeMetric(identifier: identifier, unit: unit, dataType: dataType,
                                    lookbackDays: lookbackDays) { group.leave() }
         }
+
+        // Body composition from HealthKit (weight, body fat, lean mass → .bodyComp)
+        group.enter()
+        importBodyComp(lookbackDays: lookbackDays) { group.leave() }
 
         // Sleep (category type)
         group.enter()
@@ -156,6 +164,105 @@ class HealthKitMetricProvider {
                 }
                 completion()
             }
+        }
+    }
+
+    // MARK: - Body Composition Import (HealthKit → .bodyComp)
+
+    /// Imports weight, body fat %, and lean mass from HealthKit as .bodyComp measurements.
+    /// Same structure as scale measurements so both sources are unified.
+    /// Skips days that already have a .bodyComp measurement (scale data preferred).
+    private func importBodyComp(lookbackDays: Int, completion: @escaping () -> Void) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let rangeStart = cal.date(byAdding: .day, value: -lookbackDays, to: today) else {
+            completion(); return
+        }
+
+        let group = DispatchGroup()
+        let kgUnit = HKUnit.gramUnit(with: .kilo)
+        let pctUnit = HKUnit.percent()
+
+        var weightByDay: [Date: (value: Double, source: String)] = [:]
+        var fatPctByDay: [Date: Double] = [:]
+        var leanByDay: [Date: Double] = [:]
+
+        group.enter()
+        healthKit.fetchMetricSamples(identifier: .bodyMass, unit: kgUnit,
+                                      from: rangeStart, to: Date()) { samples in
+            for s in samples {
+                let day = cal.startOfDay(for: s.timestamp)
+                weightByDay[day] = (value: s.value, source: s.sourceName)
+            }
+            group.leave()
+        }
+
+        group.enter()
+        healthKit.fetchMetricSamples(identifier: .bodyFatPercentage, unit: pctUnit,
+                                      from: rangeStart, to: Date()) { samples in
+            for s in samples {
+                let day = cal.startOfDay(for: s.timestamp)
+                fatPctByDay[day] = s.value * 100 // HK stores as fraction, we store as %
+            }
+            group.leave()
+        }
+
+        group.enter()
+        healthKit.fetchMetricSamples(identifier: .leanBodyMass, unit: kgUnit,
+                                      from: rangeStart, to: Date()) { samples in
+            for s in samples {
+                let day = cal.startOfDay(for: s.timestamp)
+                leanByDay[day] = s.value
+            }
+            group.leave()
+        }
+
+        group.notify(queue: .main) { [weak self] in
+            guard let self, let store = self.store else { completion(); return }
+
+            // Days that already have scale (.bodyComp) data — don't overwrite
+            let existingDays = Set(
+                store.measurements(ofType: .bodyComp)
+                    .map { cal.startOfDay(for: $0.date) }
+            )
+
+            var saved = 0
+            for (day, weightEntry) in weightByDay where !existingDays.contains(day) {
+                let hkSrc = DataSource.healthKitSource(weightEntry.source)
+                var dp: [DataPoint] = [
+                    DataPoint(timestamp: day, endTimestamp: nil, type: DataType.weight,
+                              value: weightEntry.value, unit: "kg", source: hkSrc, role: .primary),
+                ]
+
+                // BMI if we have height from profile (optional)
+                // Not adding BMI here since we may not have profile — keep it simple
+
+                if let fatPct = fatPctByDay[day] {
+                    dp.append(DataPoint(timestamp: day, endTimestamp: nil, type: DataType.bodyFatPercent,
+                                        value: fatPct, unit: "%", source: hkSrc, role: .primary))
+                    let fatMass = weightEntry.value * fatPct / 100
+                    dp.append(DataPoint(timestamp: day, endTimestamp: nil, type: DataType.fatMassKg,
+                                        value: round(fatMass * 100) / 100, unit: "kg", source: hkSrc, role: .detail))
+                }
+
+                if let lean = leanByDay[day] {
+                    dp.append(DataPoint(timestamp: day, endTimestamp: nil, type: DataType.fatFreeMassKg,
+                                        value: lean, unit: "kg", source: hkSrc, role: .detail))
+                }
+
+                let measurement = SensorMeasurement(
+                    id: UUID(), date: day, type: .bodyComp,
+                    sources: [MeasurementSource.healthKitDevice(name: weightEntry.source)],
+                    dataPoints: dp, rawDataFiles: []
+                )
+                store.save(measurement)
+                saved += 1
+            }
+
+            if saved > 0 {
+                AppLogger.health.info("HealthKit body comp: imported \(saved) days")
+            }
+            completion()
         }
     }
 

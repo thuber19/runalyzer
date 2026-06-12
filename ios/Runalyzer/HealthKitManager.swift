@@ -127,7 +127,9 @@ class HealthKitManager: ObservableObject {
             .heartRate, .stepCount, .distanceWalkingRunning, .distanceCycling,
             .activeEnergyBurned, .heartRateVariabilitySDNN, .restingHeartRate,
             .oxygenSaturation, .bodyTemperature, .vo2Max,
-            .runningSpeed
+            .runningSpeed, .respiratoryRate, .walkingHeartRateAverage,
+            .appleSleepingWristTemperature, .bodyMass, .bodyFatPercentage,
+            .leanBodyMass
         ]
         for id in quantityIDs {
             if let t = HKQuantityType.quantityType(forIdentifier: id) { types.insert(t) }

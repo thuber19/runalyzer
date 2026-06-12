@@ -21,7 +21,7 @@ struct HomeTab: View {
 
                     HStack(spacing: 12) { activityTile; habitsTile }
 
-                    HStack(spacing: 12) { stepsTile; workoutsTile }
+                    HStack(spacing: 12) { bodyCompTile; workoutsTile }
                 }
                 .padding()
             }
@@ -267,21 +267,35 @@ struct HomeTab: View {
         }
     }
 
-    // MARK: - Steps
+    // MARK: - Body Composition
 
-    private var stepsTile: some View {
-        let today = cal.startOfDay(for: Date())
-        let stepsPoints = metricIndex.query(type: DataType.steps, measurementType: .metric,
-                                            from: today, to: Date(), filter: sourcePrefs)
-        let total = stepsPoints.map(\.value).max() ?? 0
+    private var bodyCompTile: some View {
+        let bodyComps = measurementStore.measurements(ofType: .bodyComp)
+        let latest = bodyComps.max(by: { $0.date < $1.date })
+        let dp = latest.map { measurementStore.dataPoints(for: $0.id) } ?? []
+        let displayWeight = dp.first(where: { $0.type == DataType.weight })?.value
+        let bodyFat = dp.first(where: { $0.type == DataType.bodyFatPercent })?.value
 
-        return DashboardTile(
-            title: "STEPS",
-            value: total > 0 ? String(format: "%.0f", total) : "--",
-            detail: " ",
-            period: "Today"
-        ) {
-            MetricTrendView(metricType: DataType.steps, title: "Steps", unit: "steps", color: .green)
+        return CustomTile {
+            BodyCompDashboardView()
+        } content: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("BODY").font(.caption2).foregroundColor(.gray)
+                if let w = displayWeight {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(String(format: "%.1f", w)).font(.title.bold().monospacedDigit())
+                        Text("kg").font(.caption2).foregroundColor(.gray)
+                    }
+                    if let bf = bodyFat {
+                        Text(String(format: "%.1f%% fat", bf))
+                            .font(.caption2).foregroundColor(.orange)
+                    }
+                } else {
+                    Text("--").font(.title.bold()).foregroundColor(.gray)
+                }
+                Spacer()
+                Text("Latest").font(.caption2).foregroundColor(.gray.opacity(0.6))
+            }
         }
     }
 

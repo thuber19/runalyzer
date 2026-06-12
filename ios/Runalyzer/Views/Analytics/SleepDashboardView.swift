@@ -121,6 +121,9 @@ struct SleepDashboardView: View {
             .background(Color(hex: 0x16213e))
             .cornerRadius(12)
 
+            // Card 1b: Overnight vitals (wrist temp, respiratory rate)
+            overnightVitalsCard(for: lastNight)
+
             // Card 2: Stages + percentages + hypnogram
             let deepPct = lastNight.asleep > 0 ? lastNight.deep / lastNight.asleep * 100 : 0
             let corePct = lastNight.asleep > 0 ? max(0, coreMin) / lastNight.asleep * 100 : 0
@@ -181,6 +184,81 @@ struct SleepDashboardView: View {
         return Group {
             if !insights.isEmpty {
                 insightsCardView(insights)
+            }
+        }
+    }
+
+    // MARK: - Overnight Vitals
+
+    /// Wrist temperature deviation and respiratory rate from overnight readings.
+    private func overnightVitalsCard(for night: SleepTrendView.SleepNight) -> some View {
+        let nightStart = night.stages.map(\.start).min() ?? night.date
+        let nightEnd = night.stages.map(\.end).max() ?? night.date
+
+        let wristPoints = metricIndex.query(type: DataType.wristTemperature, measurementType: .metric,
+                                             from: nightStart, to: nightEnd)
+        let respPoints = metricIndex.query(type: DataType.respiratoryRate, measurementType: .metric,
+                                            from: nightStart, to: nightEnd)
+
+        let wristVal = wristPoints.last?.value
+        let respVal = respPoints.isEmpty ? nil : respPoints.map(\.value).reduce(0, +) / Double(respPoints.count)
+
+        let hasData = wristVal != nil || respVal != nil
+
+        return Group {
+            if hasData {
+                HStack(spacing: 0) {
+                    if let w = wristVal {
+                        statCol(String(format: "%+.1f°C", w), "Wrist Temp", w > 0.5 ? .orange : (w < -0.5 ? .blue : .white))
+                    }
+                    if let r = respVal {
+                        statCol(String(format: "%.1f", r), "Resp. Rate")
+                    }
+                }
+                .padding()
+                .background(Color(hex: 0x16213e))
+                .cornerRadius(12)
+            }
+        }
+    }
+
+    /// Average overnight vitals for the period view.
+    private func periodVitalsCard(nights: ArraySlice<SleepTrendView.SleepNight>) -> some View {
+        var wristValues: [Double] = []
+        var respValues: [Double] = []
+
+        for night in nights {
+            let nightStart = night.stages.map(\.start).min() ?? night.date
+            let nightEnd = night.stages.map(\.end).max() ?? night.date
+
+            let wristPoints = metricIndex.query(type: DataType.wristTemperature, measurementType: .metric,
+                                                 from: nightStart, to: nightEnd)
+            if let last = wristPoints.last { wristValues.append(last.value) }
+
+            let respPoints = metricIndex.query(type: DataType.respiratoryRate, measurementType: .metric,
+                                                from: nightStart, to: nightEnd)
+            if !respPoints.isEmpty {
+                respValues.append(respPoints.map(\.value).reduce(0, +) / Double(respPoints.count))
+            }
+        }
+
+        let hasData = !wristValues.isEmpty || !respValues.isEmpty
+
+        return Group {
+            if hasData {
+                HStack(spacing: 0) {
+                    if !wristValues.isEmpty {
+                        let avg = wristValues.reduce(0, +) / Double(wristValues.count)
+                        statCol(String(format: "%+.1f°C", avg), "Wrist Temp")
+                    }
+                    if !respValues.isEmpty {
+                        let avg = respValues.reduce(0, +) / Double(respValues.count)
+                        statCol(String(format: "%.1f br/min", avg), "Resp. Rate")
+                    }
+                }
+                .padding()
+                .background(Color(hex: 0x16213e))
+                .cornerRadius(12)
             }
         }
     }
@@ -269,6 +347,9 @@ struct SleepDashboardView: View {
             .padding()
             .background(Color(hex: 0x16213e))
             .cornerRadius(12)
+
+            // Overnight vitals averages
+            periodVitalsCard(nights: periodNights)
 
             // Remaining stats
             VStack(alignment: .leading, spacing: 8) {

@@ -290,6 +290,10 @@ struct CategoryDashboardView: View {
             return String(format: "%.0f", v * 100)
         case DataType.vo2Max:
             return String(format: "%.1f", v)
+        case DataType.respiratoryRate:
+            return String(format: "%.1f", v)
+        case DataType.wristTemperature:
+            return String(format: "%+.1f", v)
         default:
             return String(format: "%.0f", v)
         }
@@ -348,7 +352,7 @@ struct CategoryDashboardView: View {
 
 extension CategoryDashboardView {
 
-    /// Heart category: RHR, HRV, SpO2, VO2 Max
+    /// Heart category: RHR, HRV, SpO2, VO2 Max, Respiratory Rate, Walking HR
     static func heart() -> CategoryDashboardView {
         CategoryDashboardView(
             title: "Heart",
@@ -357,21 +361,27 @@ extension CategoryDashboardView {
             metrics: [
                 MetricDefinition(id: DataType.restingHeartRate, title: "Resting HR",
                                  unit: "bpm", color: .red, aggregation: .latest,
-                                 direction: .lowerIsBetter, weight: 0.30),
+                                 direction: .lowerIsBetter, weight: 0.25),
                 MetricDefinition(id: DataType.hrvSDNN, title: "HRV (SDNN)",
                                  unit: "ms", color: .purple, aggregation: .dailyAverage,
-                                 direction: .higherIsBetter, weight: 0.30),
+                                 direction: .higherIsBetter, weight: 0.25),
                 MetricDefinition(id: DataType.bloodOxygen, title: "Blood Oxygen",
                                  unit: "%", color: .blue, aggregation: .latest,
-                                 direction: .higherIsBetter, weight: 0.15),
+                                 direction: .higherIsBetter, weight: 0.10),
                 MetricDefinition(id: DataType.vo2Max, title: "VO₂ Max",
                                  unit: "mL/kg/min", color: .green, aggregation: .latest,
-                                 direction: .higherIsBetter, weight: 0.25),
+                                 direction: .higherIsBetter, weight: 0.15),
+                MetricDefinition(id: DataType.respiratoryRate, title: "Resp. Rate",
+                                 unit: "br/min", color: .cyan, aggregation: .dailyAverage,
+                                 direction: .lowerIsBetter, weight: 0.15),
+                MetricDefinition(id: DataType.walkingHeartRateAvg, title: "Walking HR",
+                                 unit: "bpm", color: .orange, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.10),
             ]
         )
     }
 
-    /// Activity category: Steps, Distance
+    /// Activity category: Steps, Distance, Active Energy
     static func activity() -> CategoryDashboardView {
         CategoryDashboardView(
             title: "Activity",
@@ -380,10 +390,13 @@ extension CategoryDashboardView {
             metrics: [
                 MetricDefinition(id: DataType.steps, title: "Steps",
                                  unit: "steps", color: .green, aggregation: .max,
-                                 direction: .higherIsBetter, weight: 0.6),
+                                 direction: .higherIsBetter, weight: 0.40),
                 MetricDefinition(id: DataType.distance, title: "Distance",
                                  unit: "m", color: .orange, aggregation: .max,
-                                 direction: .higherIsBetter, weight: 0.4),
+                                 direction: .higherIsBetter, weight: 0.30),
+                MetricDefinition(id: DataType.activeEnergy, title: "Active Energy",
+                                 unit: "kcal", color: .red, aggregation: .max,
+                                 direction: .higherIsBetter, weight: 0.30),
             ]
         )
     }
