@@ -17,7 +17,7 @@ struct HomeTab: View {
                 VStack(spacing: 12) {
                     recoveryTile
 
-                    HStack(spacing: 12) { rhrTile; hrvTile }
+                    heartTile
 
                     HStack(spacing: 12) { sleepTile; habitsTile }
 
@@ -85,53 +85,56 @@ struct HomeTab: View {
         return metricIndex.query(type: DataType.recoveryIndex, from: dayStart, to: dayEnd).first?.value
     }
 
-    // MARK: - RHR
+    // MARK: - Heart
 
-    private var rhrTile: some View {
+    private var heartTile: some View {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
-        let points = metricIndex.query(type: DataType.restingHeartRate, measurementType: .metric,
-                                       from: weekAgo, to: Date(), filter: sourcePrefs)
-        let latest = points.last?.value
-
-        return DashboardTile(
-            title: "RESTING HR",
-            value: latest.map { String(Int($0)) } ?? "--",
-            unit: "bpm",
-            period: "7D",
-            sparklineValues: points.count > 1 ? points.map(\.value) : nil,
-            sparklineColor: .red
-        ) {
-            MetricTrendView(metricType: DataType.restingHeartRate, title: "Resting HR", unit: "bpm", color: .red)
-        }
-    }
-
-    // MARK: - HRV
-
-    private var hrvTile: some View {
-        let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
-        let points = metricIndex.query(type: DataType.hrvSDNN, measurementType: .metric,
-                                       from: weekAgo, to: Date(), filter: sourcePrefs)
-        var dailyAvgs: [Double] = []
+        let rhrPoints = metricIndex.query(type: DataType.restingHeartRate, measurementType: .metric,
+                                          from: weekAgo, to: Date(), filter: sourcePrefs)
+        let hrvPoints = metricIndex.query(type: DataType.hrvSDNN, measurementType: .metric,
+                                          from: weekAgo, to: Date(), filter: sourcePrefs)
+        let latestRHR = rhrPoints.last?.value
+        // Daily average for HRV
         var byDay: [Date: [Double]] = [:]
-        for p in points {
+        for p in hrvPoints {
             let day = cal.startOfDay(for: p.timestamp)
             byDay[day, default: []].append(p.value)
         }
-        for day in byDay.keys.sorted() {
+        let latestHRV = byDay.keys.sorted().last.flatMap { day in
             let vals = byDay[day]!
-            dailyAvgs.append(vals.reduce(0, +) / Double(vals.count))
+            return vals.reduce(0, +) / Double(vals.count)
         }
-        let latest = dailyAvgs.last
 
-        return DashboardTile(
-            title: "HRV (SDNN)",
-            value: latest.map { String(Int($0)) } ?? "--",
-            unit: "ms",
-            period: "7D",
-            sparklineValues: dailyAvgs.count > 1 ? dailyAvgs : nil,
-            sparklineColor: .purple
-        ) {
-            MetricTrendView(metricType: DataType.hrvSDNN, title: "HRV (SDNN)", unit: "ms", color: .purple)
+        return CustomTile {
+            CategoryDashboardView.heart()
+        } content: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("HEART").font(.caption2).foregroundColor(.gray)
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text(latestRHR.map { String(Int($0)) } ?? "--")
+                                .font(.title.bold().monospacedDigit())
+                            Text("bpm").font(.caption2).foregroundColor(.gray)
+                        }
+                        Text("RHR").font(.caption2).foregroundColor(.red)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text(latestHRV.map { String(Int($0)) } ?? "--")
+                                .font(.title.bold().monospacedDigit())
+                            Text("ms").font(.caption2).foregroundColor(.gray)
+                        }
+                        Text("HRV").font(.caption2).foregroundColor(.purple)
+                    }
+                    Spacer()
+                    if rhrPoints.count > 1 {
+                        Sparkline(values: rhrPoints.map(\.value), color: .red)
+                            .frame(width: 80, height: 24)
+                    }
+                }
+                Text("7D").font(.caption2).foregroundColor(.gray.opacity(0.6))
+            }
         }
     }
 
