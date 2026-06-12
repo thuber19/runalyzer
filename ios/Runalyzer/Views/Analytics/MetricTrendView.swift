@@ -12,7 +12,6 @@ struct MetricTrendView: View {
     @EnvironmentObject var sourcePrefs: SourcePreferenceStore
 
     @State private var timeRange: TimeRange = .month
-    @State private var scrubAggregate: MetricAggregator.DailyAggregate?
 
     enum TimeRange: String, CaseIterable {
         case week = "7D", month = "30D", quarter = "90D", year = "1Y"
@@ -79,101 +78,12 @@ struct MetricTrendView: View {
     // MARK: - Trend Chart
 
     private var trendChart: some View {
-        VStack(spacing: 4) {
-            // Scrub indicator
-            if let agg = scrubAggregate {
-                HStack(spacing: 6) {
-                    Text(MetricAggregator.formatDay(agg.date))
-                        .font(.caption).foregroundColor(.gray)
-                    Text(String(format: "%.1f", agg.avg))
-                        .font(.caption.bold().monospacedDigit())
-                    Text(unit).font(.caption2).foregroundColor(.gray)
-                }
-                .transition(.opacity)
-            }
-
-            Chart {
-                // Min/max band
-                ForEach(aggregates) { agg in
-                    AreaMark(
-                        x: .value("Date", agg.date),
-                        yStart: .value("Min", agg.min),
-                        yEnd: .value("Max", agg.max)
-                    )
-                    .foregroundStyle(color.opacity(0.15))
-                }
-                // Average line
-                ForEach(aggregates) { agg in
-                    LineMark(
-                        x: .value("Date", agg.date),
-                        y: .value("Avg", agg.avg)
-                    )
-                    .foregroundStyle(color)
-                    .lineStyle(StrokeStyle(lineWidth: 2))
-                }
-                // Points
-                ForEach(aggregates) { agg in
-                    PointMark(
-                        x: .value("Date", agg.date),
-                        y: .value("Avg", agg.avg)
-                    )
-                    .foregroundStyle(color)
-                    .symbolSize(aggregates.count < 15 ? 30 : 0)
-                }
-
-                // Scrub rule line
-                if let agg = scrubAggregate {
-                    RuleMark(x: .value("Scrub", agg.date))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineStyle(StrokeStyle(lineWidth: 1))
-                    PointMark(x: .value("Scrub", agg.date), y: .value("Val", agg.avg))
-                        .foregroundStyle(.white)
-                        .symbolSize(50)
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisValueLabel {
-                        if let v = value.as(Double.self) {
-                            Text(String(format: "%.0f", v))
-                                .font(.caption2).foregroundColor(.gray)
-                        }
-                    }
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
-                        .foregroundStyle(Color.gray.opacity(0.3))
-                }
-            }
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 5)) { value in
-                    AxisValueLabel {
-                        if let date = value.as(Date.self) {
-                            Text(shortDate(date)).font(.caption2).foregroundColor(.gray)
-                        }
-                    }
-                }
-            }
-            .chartOverlay { proxy in
-                GeometryReader { geo in
-                    Rectangle()
-                        .fill(Color.clear)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { drag in
-                                    let x = drag.location.x - geo[proxy.plotAreaFrame].origin.x
-                                    guard let date: Date = proxy.value(atX: x) else { return }
-                                    // Find nearest aggregate
-                                    scrubAggregate = aggregates.min(by: {
-                                        abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))
-                                    })
-                                }
-                                .onEnded { _ in
-                                    scrubAggregate = nil
-                                }
-                        )
-                }
-            }
-        }
+        ScrubbingLineChart(
+            data: aggregates.map { ChartDataPoint(date: $0.date, avg: $0.avg, min: $0.min, max: $0.max) },
+            color: color,
+            unit: unit,
+            dateFormat: timeRange == .year ? "MMM" : "d MMM"
+        )
     }
 
     // MARK: - Stats Row
@@ -251,11 +161,4 @@ struct MetricTrendView: View {
         .padding(.horizontal)
     }
 
-    // MARK: - Helpers
-
-    private func shortDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = timeRange == .year ? "MMM" : "d MMM"
-        return f.string(from: date)
-    }
 }

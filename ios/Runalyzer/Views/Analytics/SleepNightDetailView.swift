@@ -6,15 +6,17 @@ struct SleepNightDetailView: View {
     let date: Date
     let stages: [(stage: String, start: Date, end: Date)]
 
-    @State private var scrubDate: Date?
-
     private let cal = Calendar.current
 
-    // Bottom to top: Deep=0, Core=1, REM=2, Awake=3 (matches Apple Health layout)
-    private let stageYPosition: [String: Int] = ["Deep": 0, "Core": 1, "REM": 2, "Awake": 3]
-    private let stageLabels = ["Deep", "Core", "REM", "Awake"] // index 0..3, bottom to top
     private let stageColors: [String: Color] = [
         "Deep": .indigo, "Core": .blue, "REM": .cyan, "Awake": .gray
+    ]
+
+    private static let sleepCategories: [TimelineCategory] = [
+        TimelineCategory(name: "Deep", color: .indigo, position: 0),
+        TimelineCategory(name: "Core", color: .blue, position: 1),
+        TimelineCategory(name: "REM", color: .cyan, position: 2),
+        TimelineCategory(name: "Awake", color: .gray, position: 3),
     ]
 
     var body: some View {
@@ -22,9 +24,15 @@ struct SleepNightDetailView: View {
             VStack(spacing: 16) {
                 summaryCard
                 if !stages.isEmpty {
-                    timelineChart
-                        .frame(height: 160)
-                        .padding(.horizontal)
+                    IntervalTimeline(
+                        intervals: stages.map {
+                            TimelineInterval(category: $0.stage, start: $0.start, end: $0.end)
+                        },
+                        categories: Self.sleepCategories
+                    )
+                    .frame(height: 160)
+                    .padding(.horizontal)
+
                     stageBreakdownCard
                 }
             }
@@ -53,121 +61,6 @@ struct SleepNightDetailView: View {
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
         .padding(.horizontal)
-    }
-
-    // MARK: - Hypnogram Timeline
-
-    private var nightRange: (start: Date, end: Date) {
-        guard let first = stages.first?.start, let last = stages.last?.end else {
-            return (Date(), Date())
-        }
-        // Round down to the previous hour, round up to the next hour
-        let startHour = cal.dateInterval(of: .hour, for: first)?.start ?? first
-        let endHour: Date = {
-            let interval = cal.dateInterval(of: .hour, for: last)
-            if let s = interval?.start, s == last { return last }
-            return cal.date(byAdding: .hour, value: 1, to: interval?.start ?? last) ?? last
-        }()
-        return (startHour, endHour)
-    }
-
-    private var hourlyMarks: [Date] {
-        let range = nightRange
-        var marks: [Date] = []
-        var cursor = range.start
-        while cursor <= range.end {
-            marks.append(cursor)
-            guard let next = cal.date(byAdding: .hour, value: 1, to: cursor) else { break }
-            cursor = next
-        }
-        return marks
-    }
-
-    /// Stage at a given time for scrubbing display.
-    private func stageAt(_ date: Date) -> String? {
-        stages.first { date >= $0.start && date < $0.end }?.stage
-    }
-
-    private var timelineChart: some View {
-        let range = nightRange
-
-        return VStack(spacing: 4) {
-            // Scrub indicator
-            if let scrub = scrubDate, let stage = stageAt(scrub) {
-                HStack(spacing: 6) {
-                    Circle().fill(stageColors[stage] ?? .gray).frame(width: 8, height: 8)
-                    Text(stage).font(.caption.bold())
-                    Text(timeString(scrub)).font(.caption.monospacedDigit()).foregroundColor(.gray)
-                }
-                .frame(maxWidth: .infinity)
-                .transition(.opacity)
-            }
-
-            Chart(stages.indices, id: \.self) { i in
-                let s = stages[i]
-                let y = stageYPosition[s.stage] ?? 0
-                RectangleMark(
-                    xStart: .value("Start", s.start),
-                    xEnd: .value("End", s.end),
-                    yStart: .value("Stage", y),
-                    yEnd: .value("StageTop", y + 1)
-                )
-                .foregroundStyle(stageColors[s.stage] ?? .gray)
-
-                // Scrub rule line
-                if let scrub = scrubDate {
-                    RuleMark(x: .value("Scrub", scrub))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .lineStyle(StrokeStyle(lineWidth: 1))
-                }
-            }
-            .chartYScale(domain: 0...4)
-            .chartYAxis {
-                AxisMarks(position: .leading, values: [0.5, 1.5, 2.5, 3.5]) { value in
-                    AxisValueLabel {
-                        if let v = value.as(Double.self) {
-                            let idx = Int(v - 0.5)
-                            if idx >= 0 && idx < stageLabels.count {
-                                Text(stageLabels[idx]).font(.caption2).foregroundColor(.gray)
-                            }
-                        }
-                    }
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3]))
-                        .foregroundStyle(Color.gray.opacity(0.3))
-                }
-            }
-            .chartXScale(domain: range.start...range.end)
-            .chartXAxis {
-                AxisMarks(values: hourlyMarks) { value in
-                    AxisValueLabel {
-                        if let d = value.as(Date.self) {
-                            Text(timeString(d)).font(.caption2).foregroundColor(.gray)
-                        }
-                    }
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3]))
-                        .foregroundStyle(Color.gray.opacity(0.2))
-                }
-            }
-            .chartOverlay { proxy in
-                GeometryReader { geo in
-                    Rectangle()
-                        .fill(Color.clear)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { drag in
-                                    let x = drag.location.x - geo[proxy.plotAreaFrame].origin.x
-                                    if let d: Date = proxy.value(atX: x) {
-                                        scrubDate = d
-                                    }
-                                }
-                                .onEnded { _ in
-                                    scrubDate = nil
-                                }
-                        )
-                }
-            }
-        }
     }
 
     // MARK: - Stage Breakdown
@@ -243,15 +136,5 @@ struct SleepNightDetailView: View {
 
     private func dateString(_ d: Date) -> String {
         Self.dateFmt.string(from: d)
-    }
-
-    private static let timeFmt: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f
-    }()
-
-    private func timeString(_ d: Date) -> String {
-        Self.timeFmt.string(from: d)
     }
 }

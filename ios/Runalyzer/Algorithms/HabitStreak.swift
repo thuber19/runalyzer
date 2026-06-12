@@ -1,4 +1,4 @@
-yes import Foundation
+import Foundation
 
 /// Statistics for a single habit computed from its log history.
 struct HabitStats {
