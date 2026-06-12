@@ -46,14 +46,24 @@ class HealthKitMetricProvider {
             (.oxygenSaturation,         HKUnit.percent(), DataType.bloodOxygen),
             (.bodyTemperature,          HKUnit.degreeCelsius(), DataType.bodyTemperature),
             (.vo2Max,                   HKUnit(from: "mL/kg*min"), DataType.vo2Max),
-            (.stepCount,                HKUnit.count(), DataType.steps),
-            (.distanceWalkingRunning,   HKUnit.meter(), DataType.distance),
         ]
 
         for (identifier, unit, dataType) in quantityMetrics {
             group.enter()
             importQuantityMetric(identifier: identifier, unit: unit, dataType: dataType,
                                  lookbackDays: lookbackDays) { group.leave() }
+        }
+
+        // Cumulative metrics — use HKStatisticsCollectionQuery for proper deduplication
+        let cumulativeMetrics: [(HKQuantityTypeIdentifier, HKUnit, String)] = [
+            (.stepCount,              HKUnit.count(), DataType.steps),
+            (.distanceWalkingRunning, HKUnit.meter(), DataType.distance),
+        ]
+
+        for (identifier, unit, dataType) in cumulativeMetrics {
+            group.enter()
+            importCumulativeMetric(identifier: identifier, unit: unit, dataType: dataType,
+                                   lookbackDays: lookbackDays) { group.leave() }
         }
 
         // Sleep (category type)
@@ -88,9 +98,6 @@ class HealthKitMetricProvider {
         ) { [weak self] samples in
             guard let self, let store = self.store else { completion(); return }
 
-            // For cumulative metrics (steps), aggregate per day instead of storing each sample
-            let isCumulative = (identifier == .stepCount || identifier == .distanceWalkingRunning)
-
             var byDay: [Date: [(value: Double, timestamp: Date, sourceName: String)]] = [:]
             for s in samples {
                 let day = cal.startOfDay(for: s.timestamp)
@@ -99,33 +106,53 @@ class HealthKitMetricProvider {
 
             DispatchQueue.main.async {
                 for (day, daySamples) in byDay {
-                    if isCumulative {
-                        // Steps: sum per SOURCE per day (not across sources — would double-count)
-                        // Apple Health deduplicates by taking max of overlapping periods
-                        var bySource: [String: Double] = [:]
-                        for s in daySamples { bySource[s.sourceName, default: 0] += s.value }
-
-                        // Store one DataPoint per source
-                        var dps: [DataPoint] = []
-                        for (source, total) in bySource.sorted(by: { $0.value > $1.value }) {
-                            dps.append(DataPoint(timestamp: day, endTimestamp: nil,
-                                                 type: dataType, value: total,
-                                                 unit: unit.unitString, source: DataSource.healthKitSource(source),
-                                                 role: .primary))
-                        }
-                        self.upsertMetric(day: day, dataType: dataType, dataPoints: dps,
-                                          samples: daySamples, store: store, replaceFull: true)
-                    } else {
-                        // All other metrics: one DataPoint per reading
-                        let dps = daySamples.map { s in
-                            DataPoint(timestamp: s.timestamp, endTimestamp: nil,
-                                      type: dataType, value: s.value,
-                                      unit: unit.unitString, source: DataSource.healthKitSource(s.sourceName),
-                                      role: .primary)
-                        }
-                        self.upsertMetric(day: day, dataType: dataType, dataPoints: dps,
-                                          samples: daySamples, store: store, replaceFull: false)
+                    let dps = daySamples.map { s in
+                        DataPoint(timestamp: s.timestamp, endTimestamp: nil,
+                                  type: dataType, value: s.value,
+                                  unit: unit.unitString, source: DataSource.healthKitSource(s.sourceName),
+                                  role: .primary)
                     }
+                    self.upsertMetric(day: day, dataType: dataType, dataPoints: dps,
+                                      samples: daySamples, store: store, replaceFull: false)
+                }
+                completion()
+            }
+        }
+    }
+
+    // MARK: - Cumulative Metric Import (Steps, Distance)
+
+    /// Uses HKStatisticsCollectionQuery for proper deduplication of overlapping sources.
+    /// Stores one DataPoint per day with the deduplicated total.
+    private func importCumulativeMetric(
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        dataType: String,
+        lookbackDays: Int,
+        completion: @escaping () -> Void
+    ) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let rangeStart = cal.date(byAdding: .day, value: -lookbackDays, to: today) else {
+            completion(); return
+        }
+
+        healthKit.fetchDailyTotals(
+            identifier: identifier, unit: unit,
+            from: rangeStart, to: Date()
+        ) { [weak self] dailyTotals in
+            guard let self, let store = self.store else { completion(); return }
+
+            DispatchQueue.main.async {
+                for entry in dailyTotals {
+                    let day = cal.startOfDay(for: entry.date)
+                    let dp = DataPoint(timestamp: day, endTimestamp: nil,
+                                       type: dataType, value: entry.value,
+                                       unit: unit.unitString, source: DataSource.healthKitSource("Apple Health"),
+                                       role: .primary)
+                    self.upsertMetric(day: day, dataType: dataType, dataPoints: [dp],
+                                      samples: [(value: entry.value, timestamp: day, sourceName: "Apple Health")],
+                                      store: store, replaceFull: true)
                 }
                 completion()
             }

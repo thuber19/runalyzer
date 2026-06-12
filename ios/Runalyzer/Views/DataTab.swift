@@ -323,7 +323,12 @@ struct DataTab: View {
         case DataType.restingHeartRate:
             return String(format: "%.0f bpm · %d readings", min, count)
         case DataType.steps:
-            return String(format: "%.0f steps", max)  // max source value
+            return String(format: "%.0f steps", max)
+        case DataType.distance:
+            if max >= 1000 {
+                return String(format: "%.1f km", max / 1000)
+            }
+            return String(format: "%.0f m", max)
         case DataType.bloodOxygen:
             return String(format: "%.0f%% · %d readings", avg * 100, count)
         case DataType.vo2Max:
@@ -343,6 +348,7 @@ struct DataTab: View {
         case DataType.hrvSDNN:          return "HRV (SDNN)"
         case DataType.restingHeartRate: return "Resting Heart Rate"
         case DataType.steps:            return "Steps"
+        case DataType.distance:         return "Distance"
         case DataType.bloodOxygen:      return "Blood Oxygen"
         case DataType.vo2Max:           return "VO2 Max"
         case DataType.bodyTemperature:  return "Body Temperature"
@@ -361,6 +367,7 @@ struct DataTab: View {
         case DataType.hrvSDNN:          return "waveform.path.ecg"
         case DataType.restingHeartRate: return "heart"
         case DataType.steps:            return "figure.walk"
+        case DataType.distance:         return "figure.walk.motion"
         case DataType.bloodOxygen:      return "lungs"
         case DataType.vo2Max:           return "wind"
         case DataType.bodyTemperature:  return "thermometer"
@@ -376,6 +383,7 @@ struct DataTab: View {
         case DataType.hrvSDNN:          return .purple
         case DataType.restingHeartRate: return .red
         case DataType.steps:            return .green
+        case DataType.distance:         return .orange
         case DataType.bloodOxygen:      return .blue
         case DataType.vo2Max:           return .orange
         case DataType.bodyTemperature:  return .yellow
@@ -390,6 +398,7 @@ struct DataTab: View {
         case DataType.heartRateSample, DataType.restingHeartRate: return "bpm"
         case DataType.hrvSDNN:          return "ms"
         case DataType.steps:            return "steps"
+        case DataType.distance:         return "m"
         case DataType.bloodOxygen:      return "%"
         case DataType.vo2Max:           return "mL/kg/min"
         case DataType.bodyTemperature:  return "°C"

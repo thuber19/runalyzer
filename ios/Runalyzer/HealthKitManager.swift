@@ -809,6 +809,42 @@ class HealthKitManager: ObservableObject {
         store.execute(query)
     }
 
+    /// Fetch daily totals for a cumulative metric (steps, distance) using HKStatisticsCollectionQuery.
+    /// Apple Health handles deduplication of overlapping sources automatically.
+    func fetchDailyTotals(
+        identifier: HKQuantityTypeIdentifier,
+        unit: HKUnit,
+        from startDate: Date,
+        to endDate: Date,
+        completion: @escaping ([(value: Double, date: Date)]) -> Void
+    ) {
+        guard let type = HKQuantityType.quantityType(forIdentifier: identifier) else {
+            completion([]); return
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let interval = DateComponents(day: 1)
+        let anchorDate = Calendar.current.startOfDay(for: startDate)
+
+        let query = HKStatisticsCollectionQuery(
+            quantityType: type,
+            quantitySamplePredicate: predicate,
+            options: .cumulativeSum,
+            anchorDate: anchorDate,
+            intervalComponents: interval
+        )
+        query.initialResultsHandler = { _, collection, error in
+            if let error { AppLogger.health.error("fetchDailyTotals \(identifier.rawValue): \(error.localizedDescription)") }
+            var results: [(value: Double, date: Date)] = []
+            collection?.enumerateStatistics(from: startDate, to: endDate) { stats, _ in
+                if let sum = stats.sumQuantity() {
+                    results.append((value: sum.doubleValue(for: unit), date: stats.startDate))
+                }
+            }
+            completion(results)
+        }
+        store.execute(query)
+    }
+
     // MARK: - Debug: dump all data types available for a time range
     #if DEBUG
     func debugDump(from startDate: Date, to endDate: Date, completion: @escaping (String) -> Void) {

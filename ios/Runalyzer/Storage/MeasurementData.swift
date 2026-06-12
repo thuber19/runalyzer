@@ -320,8 +320,11 @@ enum DataType {
     static let runningEconomy = "running_economy" // beats/km (HR cost per km — lower = more efficient)
     static let aerobicLoad = "aerobic_load"       // avg HR × duration_min (arbitrary training stress unit)
 
-    // Derived — general
-    static let sleepScore = "sleep_score"
+    // Sleep score (sleep_v1) — nightly score from sleep stages
+    static let sleepScore                = "sleep_score"                  // 0–100 overall
+    static let sleepDurationComponent    = "sleep_duration_component"    // 0–50
+    static let sleepConsistencyComponent = "sleep_consistency_component" // 0–30
+    static let sleepInterruptionComponent = "sleep_interruption_component" // 0–20
 
     // Raw HealthKit metrics (standalone daily measurements)
     static let hrvSDNN          = "heart_rate_variability_sdnn"  // individual SDNN reading (ms)

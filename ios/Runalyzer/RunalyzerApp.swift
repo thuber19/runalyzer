@@ -74,6 +74,7 @@ class AppWiring: ObservableObject {
     private(set) var scaleProvider: ScaleMeasurementProvider?
     private var imuProvider: IMUMeasurementProvider?
     private(set) var recoveryProvider: RecoveryMeasurementProvider?
+    private(set) var sleepProvider: SleepMeasurementProvider?
     private(set) var metricProvider: HealthKitMetricProvider?
     private(set) var habitProvider: HabitProvider?
 
@@ -100,6 +101,7 @@ class AppWiring: ObservableObject {
         metricProvider = HealthKitMetricProvider(healthKit: healthKit, store: store,
                                                 workoutStore: workoutStore, metricIndex: metricIndex)
         recoveryProvider = RecoveryMeasurementProvider(metricIndex: metricIndex, measurementStore: store)
+        sleepProvider = SleepMeasurementProvider(metricIndex: metricIndex, measurementStore: store)
         habitProvider = HabitProvider(habitStore: habitStore, workoutStore: workoutStore)
 
         // Per-descriptor handlers — keyed by DeviceDescriptor.id.
@@ -160,6 +162,7 @@ class AppWiring: ObservableObject {
     func refreshMetricsAndRecovery() {
         metricProvider?.importMissingMetrics { [weak self] in
             self?.recoveryProvider?.computeMissingScores()
+            self?.sleepProvider?.computeMissingScores()
             self?.habitProvider?.processAutoFulfillment()
         }
     }

@@ -16,6 +16,7 @@ struct SettingsView: View {
 
     @State private var isImporting = false
     @State private var isComputingRecovery = false
+    @State private var isComputingSleep = false
     @State private var showExportShare = false
     @State private var exportURL: URL?
     @State private var showImportPicker = false
@@ -89,6 +90,28 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(isComputingRecovery)
+                    .listRowBackground(Color(hex: 0x16213e))
+
+                    // Compute sleep scores from imported sleep stages
+                    Button(action: {
+                        isComputingSleep = true
+                        appWiring.sleepProvider?.backfillHistory(days: 90) {
+                            DispatchQueue.main.async {
+                                isComputingSleep = false
+                            }
+                        }
+                    }) {
+                        HStack {
+                            Label("Compute Sleep Scores", systemImage: "bed.double.circle")
+                            Spacer()
+                            if isComputingSleep {
+                                ProgressView()
+                            } else {
+                                Text("90 days").foregroundColor(.gray)
+                            }
+                        }
+                    }
+                    .disabled(isComputingSleep)
                     .listRowBackground(Color(hex: 0x16213e))
                 }
 

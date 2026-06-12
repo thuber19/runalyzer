@@ -14,7 +14,7 @@ struct SleepTrendView: View {
     struct SleepNight: Identifiable {
         let id: Date
         var date: Date { id }
-        let inBed: Double   // minutesyeI am 
+        let inBed: Double   // minutes
         let deep: Double
         let core: Double
         let rem: Double
@@ -66,12 +66,18 @@ struct SleepTrendView: View {
 
     /// Build sleep nights from DB data. Static so it can be shared.
     static func buildSleepNights(
-        metricIndex: MetricIndex, sourcePrefs: SourcePreferenceStore,
+        metricIndex: MetricIndex, sourcePrefs: SourcePreferenceStore?,
         lookbackDays: Int, calendar cal: Calendar
     ) -> [SleepNight] {
         guard let start = cal.date(byAdding: .day, value: -lookbackDays, to: Date()) else { return [] }
-        let points = metricIndex.query(type: DataType.sleepStage, measurementType: .metric,
+        let points: [DataPoint]
+        if let sourcePrefs {
+            points = metricIndex.query(type: DataType.sleepStage, measurementType: .metric,
                                        from: start, to: Date(), filter: sourcePrefs)
+        } else {
+            points = metricIndex.query(type: DataType.sleepStage, measurementType: .metric,
+                                       from: start, to: Date())
+        }
 
         var byDay: [Date: [DataPoint]] = [:]
         for p in points {
