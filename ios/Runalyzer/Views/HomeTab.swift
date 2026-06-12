@@ -12,18 +12,17 @@ struct HomeTab: View {
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
     private let cal = Calendar.current
 
-    // Note: MetricIndex is a lightweight struct with no cached state — the computed property
-    // is equivalent to storing it. The SQL queries it runs are the real cost, not construction.
-
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
+                    // Recovery — full width but compact
                     NavigationLink(destination: MetricTrendView(
                         metricType: DataType.recoveryIndex, title: "Recovery", unit: "", color: .cyan
                     )) { recoveryTile }
                     .buttonStyle(.plain)
 
+                    // RHR + HRV — half width each
                     HStack(spacing: 12) {
                         NavigationLink(destination: MetricTrendView(
                             metricType: DataType.restingHeartRate, title: "Resting HR", unit: "bpm", color: .red
@@ -36,16 +35,20 @@ struct HomeTab: View {
                         .buttonStyle(.plain)
                     }
 
-                    NavigationLink(destination: SleepTrendView()) {
-                        sleepTile
-                    }
-                    .buttonStyle(.plain)
+                    // Sleep + Habits — half width each, compact
+                    HStack(spacing: 12) {
+                        NavigationLink(destination: SleepTrendView()) {
+                            sleepTile
+                        }
+                        .buttonStyle(.plain)
 
-                    NavigationLink(destination: HabitsView()) {
-                        habitsTile
+                        NavigationLink(destination: HabitsView()) {
+                            habitsTile
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
 
+                    // Steps + Workouts — half width each, matched height
                     HStack(spacing: 12) {
                         NavigationLink(destination: MetricTrendView(
                             metricType: DataType.steps, title: "Steps", unit: "steps", color: .green
@@ -73,40 +76,46 @@ struct HomeTab: View {
         let todayScore = latestRecoveryScore(on: today)
         let yesterdayScore = latestRecoveryScore(on: yesterday)
 
-        // 7-day history for sparkline
         let weekAgo = cal.date(byAdding: .day, value: -7, to: today)!
         let weekScores = metricIndex.query(type: DataType.recoveryIndex, from: weekAgo, to: Date())
 
         return tile {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("RECOVERY").font(.caption2).foregroundColor(.gray)
-                    Spacer()
-                    if let t = todayScore, let y = yesterdayScore {
-                        let diff = t - y
-                        Label(String(format: "%+.0f", diff),
-                              systemImage: diff >= 0 ? "arrow.up.right" : "arrow.down.right")
-                            .font(.caption2)
-                            .foregroundColor(diff >= 0 ? .green : .orange)
+            HStack(spacing: 12) {
+                // Left: score
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("RECOVERY").font(.caption2).foregroundColor(.gray)
+                        Spacer()
+                    }
+                    if let score = todayScore {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(String(Int(score.rounded())))
+                                .font(.system(size: 36, weight: .bold, design: .rounded))
+                                .foregroundColor(recoveryColor(score))
+                            Text("/ 100").font(.caption2).foregroundColor(.gray)
+                        }
+                        HStack(spacing: 8) {
+                            Text(recoveryLabel(score))
+                                .font(.caption2).foregroundColor(recoveryColor(score))
+                            if let y = yesterdayScore {
+                                let diff = score - y
+                                Label(String(format: "%+.0f", diff),
+                                      systemImage: diff >= 0 ? "arrow.up.right" : "arrow.down.right")
+                                    .font(.caption2)
+                                    .foregroundColor(diff >= 0 ? .green : .orange)
+                            }
+                        }
+                    } else {
+                        Text("--").font(.system(size: 36, weight: .bold, design: .rounded)).foregroundColor(.gray)
+                        Text("No data").font(.caption2).foregroundColor(.gray)
                     }
                 }
+                .frame(minWidth: 100, alignment: .leading)
 
-                if let score = todayScore {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(String(Int(score.rounded())))
-                            .font(.system(size: 48, weight: .bold, design: .rounded))
-                            .foregroundColor(recoveryColor(score))
-                        Text("/ 100").font(.caption).foregroundColor(.gray)
-                    }
-                    Text(recoveryLabel(score)).font(.caption).foregroundColor(recoveryColor(score))
-                } else {
-                    Text("--").font(.system(size: 48, weight: .bold, design: .rounded)).foregroundColor(.gray)
-                    Text("No data today").font(.caption).foregroundColor(.gray)
-                }
-
+                // Right: sparkline
                 if weekScores.count > 1 {
                     sparkline(weekScores.map(\.value), color: .cyan)
-                        .frame(height: 30)
+                        .frame(height: 36)
                 }
             }
         }
@@ -159,6 +168,7 @@ struct HomeTab: View {
                     sparkline(points.map(\.value), color: .red)
                         .frame(height: 24)
                 }
+                Text("7D").font(.caption2).foregroundColor(.gray.opacity(0.6))
             }
         }
     }
@@ -169,7 +179,6 @@ struct HomeTab: View {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
         let points = metricIndex.query(type: DataType.hrvSDNN, measurementType: .metric,
                                        from: weekAgo, to: Date(), filter: sourcePrefs)
-        // Daily averages for sparkline
         var dailyAvgs: [Double] = []
         var byDay: [Date: [Double]] = [:]
         for p in points {
@@ -197,6 +206,7 @@ struct HomeTab: View {
                     sparkline(dailyAvgs, color: .purple)
                         .frame(height: 24)
                 }
+                Text("7D").font(.caption2).foregroundColor(.gray.opacity(0.6))
             }
         }
     }
@@ -204,87 +214,27 @@ struct HomeTab: View {
     // MARK: - Sleep Tile
 
     private var sleepTile: some View {
-        // Find the most recent sleep measurement (today or yesterday)
-        let today = cal.startOfDay(for: Date())
-        let sleepMeasurement = metricIndex.metricMeasurement(forDay: today, containingType: DataType.sleepStage)
-            ?? metricIndex.metricMeasurement(forDay: cal.date(byAdding: .day, value: -1, to: today)!,
-                                             containingType: DataType.sleepStage)
-        let sleepPoints = sourcePrefs.apply(
-            to: sleepMeasurement?.dataPoints.filter { $0.type == DataType.sleepStage } ?? [],
-            dataType: DataType.sleepStage
+        let nights = SleepTrendView.buildSleepNights(
+            metricIndex: metricIndex, sourcePrefs: sourcePrefs,
+            lookbackDays: 2, calendar: cal
         )
-
-        // Prefer Watch staged data over generic iPhone data
-        let hasStages = sleepPoints.contains { ["Core", "Deep", "REM"].contains($0.unit) }
-        let filtered: [DataPoint]
-        if hasStages {
-            let stagedSources = Set(sleepPoints.filter { ["Core", "Deep", "REM"].contains($0.unit) }.map(\.source))
-            filtered = sleepPoints.filter { stagedSources.contains($0.source) || ["Awake", "InBed"].contains($0.unit) }
-        } else {
-            filtered = sleepPoints
-        }
-
-        let rawIntervals = filtered.compactMap { p -> (stage: String, start: Date, end: Date)? in
-            guard let end = p.endTimestamp else { return nil }
-            return (stage: p.unit, start: p.timestamp, end: end)
-        }
-        let merged = SleepTrendView.mergeOverlappingIntervals(rawIntervals)
-
-        func mergedMinutes(for stages: [String]) -> Double {
-            merged.filter { stages.contains($0.stage) }
-                .reduce(0) { $0 + $1.end.timeIntervalSince($1.start) / 60 }
-        }
-        let asleepMin = mergedMinutes(for: ["Deep", "Core", "REM", "Asleep"])
-        let awakeMin = mergedMinutes(for: ["Awake"])
-        // Use actual InBed samples from HealthKit if available, else fall back to asleep + awake
-        let inBedFromSamples = mergedMinutes(for: ["InBed"])
-        let inBedMin = inBedFromSamples > 0 ? inBedFromSamples : asleepMin + awakeMin
-
-        return tile {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("LAST NIGHT").font(.caption2).foregroundColor(.gray)
-                if asleepMin > 0 {
-                    HStack(spacing: 20) {
-                        VStack(alignment: .leading) {
-                            Text(formatMinutes(inBedMin)).font(.title2.bold().monospacedDigit())
-                            Text("In Bed").font(.caption2).foregroundColor(.gray)
-                        }
-                        VStack(alignment: .leading) {
-                            Text(formatMinutes(asleepMin)).font(.title2.bold().monospacedDigit())
-                            Text("Asleep").font(.caption2).foregroundColor(.cyan)
-                        }
-                    }
-                } else {
-                    Text("No sleep data").font(.caption).foregroundColor(.gray)
-                }
-            }
-        }
-    }
-
-    // MARK: - Steps Tile
-
-    private var stepsTile: some View {
-        let today = cal.startOfDay(for: Date())
-        let todayEnd = Date()
-        let stepsPoints = metricIndex.query(type: DataType.steps, measurementType: .metric,
-                                            from: today, to: todayEnd, filter: sourcePrefs)
-        // Use max source value (not sum — iPhone + Watch count same steps)
-        let total = stepsPoints.map(\.value).max() ?? 0
+        let lastNight = nights.last
 
         return tile {
             VStack(alignment: .leading, spacing: 6) {
-                Text("STEPS").font(.caption2).foregroundColor(.gray)
-                if total > 0 {
-                    Text(String(format: "%.0f", total)).font(.title.bold().monospacedDigit())
+                Text("SLEEP").font(.caption2).foregroundColor(.gray)
+                if let night = lastNight, night.asleep > 0 {
+                    Text(formatMinutes(night.asleep)).font(.title.bold().monospacedDigit())
+                    Text(formatMinutes(night.inBed) + " in bed")
+                        .font(.caption2).foregroundColor(.gray)
                 } else {
                     Text("--").font(.title.bold()).foregroundColor(.gray)
+                    Text(" ").font(.caption2)
                 }
-                Text("Today").font(.caption2).foregroundColor(.gray)
+                Text("Last night").font(.caption2).foregroundColor(.gray.opacity(0.6))
             }
         }
     }
-
-    // MARK: - Workouts Tile
 
     // MARK: - Habits Tile
 
@@ -299,29 +249,54 @@ struct HomeTab: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("HABITS").font(.caption2).foregroundColor(.gray)
                 if scheduled.isEmpty {
-                    Text("No habits yet").font(.caption).foregroundColor(.gray)
+                    Text("--").font(.title.bold()).foregroundColor(.gray)
+                    Text(" ").font(.caption2)
                 } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text("\(completed)").font(.title.bold().monospacedDigit())
-                        Text("/ \(scheduled.count)").font(.caption).foregroundColor(.gray)
+                        Text("/ \(scheduled.count)").font(.caption2).foregroundColor(.gray)
                     }
-                    // Show first few habit names
                     ForEach(scheduled.prefix(3)) { habit in
                         let done = habitStore.todayLogs.contains { $0.habitId == habit.id && $0.isCompleted }
-                        HStack(spacing: 6) {
+                        HStack(spacing: 4) {
                             Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                                .font(.caption)
+                                .font(.system(size: 10))
                                 .foregroundColor(done ? Color(hex: habit.color) : .gray)
-                            Text(habit.name).font(.caption).foregroundColor(done ? .white : .gray)
+                            Text(habit.name).font(.caption2).foregroundColor(done ? .white : .gray)
+                                .lineLimit(1)
                         }
                     }
                     if scheduled.count > 3 {
                         Text("+\(scheduled.count - 3) more").font(.caption2).foregroundColor(.gray)
                     }
                 }
+                Text("Today").font(.caption2).foregroundColor(.gray.opacity(0.6))
             }
         }
     }
+
+    // MARK: - Steps Tile
+
+    private var stepsTile: some View {
+        let today = cal.startOfDay(for: Date())
+        let stepsPoints = metricIndex.query(type: DataType.steps, measurementType: .metric,
+                                            from: today, to: Date(), filter: sourcePrefs)
+        let total = stepsPoints.map(\.value).max() ?? 0
+
+        return tile {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("STEPS").font(.caption2).foregroundColor(.gray)
+                if total > 0 {
+                    Text(String(format: "%.0f", total)).font(.title.bold().monospacedDigit())
+                } else {
+                    Text("--").font(.title.bold()).foregroundColor(.gray)
+                }
+                Text("Today").font(.caption2).foregroundColor(.gray.opacity(0.6))
+            }
+        }
+    }
+
+    // MARK: - Workouts Tile
 
     private var workoutsTile: some View {
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
@@ -332,8 +307,9 @@ struct HomeTab: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("WORKOUTS").font(.caption2).foregroundColor(.gray)
                 Text("\(recentWorkouts.count)").font(.title.bold().monospacedDigit())
-                Text("\(formatMinutes(totalMinutes)) this week")
+                Text(formatMinutes(totalMinutes))
                     .font(.caption2).foregroundColor(.gray)
+                Text("7D").font(.caption2).foregroundColor(.gray.opacity(0.6))
             }
         }
     }
