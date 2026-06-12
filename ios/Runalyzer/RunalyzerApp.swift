@@ -152,6 +152,12 @@ class AppWiring: ObservableObject {
         // Import metrics from HealthKit first, then compute stress scores
         refreshMetricsAndRecovery()
 
+        // Register HKObserverQuery + background delivery for key types.
+        // iOS wakes the app on new samples — triggers the same import pipeline.
+        healthKit.enableBackgroundDelivery { [weak self] in
+            self?.refreshMetricsAndRecovery()
+        }
+
         // Re-run when app returns to foreground
         NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
             .sink { [weak self] _ in self?.refreshMetricsAndRecovery() }

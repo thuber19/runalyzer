@@ -162,6 +162,59 @@ class HealthKitManager: ObservableObject {
         }
     }
 
+    // MARK: - Background Delivery
+
+    private var observerQueries: [HKObserverQuery] = []
+
+    /// Registers HKObserverQuery + enableBackgroundDelivery for key types.
+    /// iOS wakes the app when new samples arrive; `onUpdate` triggers the import pipeline.
+    /// Call once per app launch (not per foreground).
+    func enableBackgroundDelivery(onUpdate: @escaping () -> Void) {
+        guard isAvailable else { return }
+
+        let immediateTypes: [HKSampleType] = [
+            HKObjectType.workoutType(),
+            HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
+        ]
+        let hourlyTypes: [HKSampleType] = [
+            HKQuantityType.quantityType(forIdentifier: .heartRateVariabilitySDNN)!,
+            HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!,
+            HKQuantityType.quantityType(forIdentifier: .stepCount)!,
+            HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!,
+        ]
+
+        for type in immediateTypes {
+            registerObserver(for: type, frequency: .immediate, onUpdate: onUpdate)
+        }
+        for type in hourlyTypes {
+            registerObserver(for: type, frequency: .hourly, onUpdate: onUpdate)
+        }
+    }
+
+    private func registerObserver(for type: HKSampleType, frequency: HKUpdateFrequency,
+                                  onUpdate: @escaping () -> Void) {
+        let query = HKObserverQuery(sampleType: type, predicate: nil) { _, completionHandler, error in
+            if let error {
+                AppLogger.health.error("Observer query error for \(type.identifier): \(error.localizedDescription)")
+                completionHandler()
+                return
+            }
+            AppLogger.health.info("Background delivery fired for \(type.identifier)")
+            DispatchQueue.main.async { onUpdate() }
+            completionHandler()
+        }
+        store.execute(query)
+        observerQueries.append(query)
+
+        store.enableBackgroundDelivery(for: type, frequency: frequency) { success, error in
+            if let error {
+                AppLogger.health.error("enableBackgroundDelivery failed for \(type.identifier): \(error.localizedDescription)")
+            } else {
+                AppLogger.health.info("Background delivery enabled for \(type.identifier) (\(String(describing: frequency)))")
+            }
+        }
+    }
+
     // MARK: - Fetch Recent Workouts
     func fetchRecentWorkouts(force: Bool = false) {
         // M4: skip if fetched within last 30 seconds
