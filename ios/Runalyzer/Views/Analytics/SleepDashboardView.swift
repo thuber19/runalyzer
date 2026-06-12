@@ -258,14 +258,22 @@ struct SleepDashboardView: View {
             .background(Color(hex: 0x16213e))
             .cornerRadius(12)
 
-            // Averages
+            // Key averages — visual row (like 1D layout)
+            let avgInBed = periodNights.map(\.inBed).reduce(0, +) / Double(max(1, periodNights.count))
+            HStack(spacing: 0) {
+                statCol(avgBedtimeStr, "Bedtime")
+                statCol(formatMin(avgInBed), "In Bed")
+                statCol(formatMin(avgDuration), "Asleep")
+                statCol(String(format: "%.0f%%", avgEff), "Efficiency")
+            }
+            .padding()
+            .background(Color(hex: 0x16213e))
+            .cornerRadius(12)
+
+            // Remaining stats
             VStack(alignment: .leading, spacing: 8) {
-                Text("AVERAGES").font(.caption2).foregroundColor(.gray)
-                detailRow("Score", "\(avgScore)", subtitle: scoreLabel(avgScore))
-                detailRow("Duration", formatMin(avgDuration))
+                detailRow("Avg Score", "\(avgScore)", subtitle: scoreLabel(avgScore))
                 detailRow("Deep Sleep", String(format: "%.0f%%", avgDeepPct), subtitle: "13–23% typical")
-                detailRow("Efficiency", String(format: "%.0f%%", avgEff), subtitle: "> 85% is good")
-                detailRow("Avg Bedtime", avgBedtimeStr)
                 detailRow("Nights", "\(periodNights.count)")
             }
             .padding()
