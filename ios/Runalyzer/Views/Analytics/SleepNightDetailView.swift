@@ -22,6 +22,7 @@ struct SleepNightDetailView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                scoreCard
                 summaryCard
                 if !stages.isEmpty {
                     IntervalTimeline(
@@ -41,6 +42,57 @@ struct SleepNightDetailView: View {
         .background(Color(hex: 0x1a1a2e))
         .navigationTitle(dateString(date))
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Sleep Score
+
+    private var scoreCard: some View {
+        let result = SleepScore.fromStages(stages: stages)
+        let scoreColor: Color = {
+            switch result.total {
+            case 75...: return .green
+            case 50...: return .cyan
+            case 25...: return .orange
+            default:    return .red
+            }
+        }()
+
+        return HStack(spacing: 16) {
+            // Score ring
+            ZStack {
+                Circle()
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 5)
+                    .frame(width: 56, height: 56)
+                Circle()
+                    .trim(from: 0, to: CGFloat(result.total) / 100)
+                    .stroke(scoreColor, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .frame(width: 56, height: 56)
+                    .rotationEffect(.degrees(-90))
+                Text("\(result.total)")
+                    .font(.title3.bold().monospacedDigit())
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(result.label).font(.headline).foregroundColor(scoreColor)
+                HStack(spacing: 12) {
+                    scoreComponent("Duration", result.durationScore, 50)
+                    scoreComponent("Consistency", result.consistencyScore, 30)
+                    scoreComponent("Interruptions", result.interruptionScore, 20)
+                }
+            }
+            Spacer()
+        }
+        .padding()
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
+        .padding(.horizontal)
+    }
+
+    private func scoreComponent(_ label: String, _ score: Int, _ max: Int) -> some View {
+        VStack(spacing: 2) {
+            Text("\(score)/\(max)").font(.caption.bold().monospacedDigit())
+            Text(label).font(.system(size: 9)).foregroundColor(.gray)
+        }
     }
 
     // MARK: - Summary

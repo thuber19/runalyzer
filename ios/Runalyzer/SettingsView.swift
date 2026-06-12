@@ -13,6 +13,7 @@ struct ActivityShareSheet: UIViewControllerRepresentable {
 struct SettingsView: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var appWiring: AppWiring
+    @EnvironmentObject var healthKit: HealthKitManager
     @State private var isImporting = false
     @State private var isComputingRecovery = false
     @State private var showExportShare = false
@@ -21,6 +22,9 @@ struct SettingsView: View {
     @State private var importError: String?
     @State private var showImportError = false
     @State private var dbInfo: DatabaseSync.DatabaseInfo?
+    @State private var sleepScoreProbeResult: String?
+    @State private var showSleepScoreProbe = false
+    @State private var isProbingSleepScore = false
 
     var body: some View {
         NavigationStack {
@@ -89,6 +93,38 @@ struct SettingsView: View {
                     }
                     .disabled(isComputingRecovery)
                     .listRowBackground(Color(hex: 0x16213e))
+                }
+
+                // Debug
+                Section("Debug") {
+                    Button(action: {
+                        isProbingSleepScore = true
+                        healthKit.probeSleepScore { result in
+                            DispatchQueue.main.async {
+                                sleepScoreProbeResult = result
+                                isProbingSleepScore = false
+                                showSleepScoreProbe = true
+                            }
+                        }
+                    }) {
+                        HStack {
+                            Label("Probe Apple Sleep Score", systemImage: "moon.zzz")
+                            Spacer()
+                            if isProbingSleepScore {
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isProbingSleepScore)
+                    .listRowBackground(Color(hex: 0x16213e))
+                }
+                .alert("Sleep Score Probe", isPresented: $showSleepScoreProbe) {
+                    Button("OK") {}
+                    Button("Copy") {
+                        UIPasteboard.general.string = sleepScoreProbeResult
+                    }
+                } message: {
+                    Text(sleepScoreProbeResult ?? "No result")
                 }
 
                 // Database

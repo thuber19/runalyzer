@@ -136,15 +136,29 @@ struct HomeTab: View {
     private var sleepTile: some View {
         let nights = SleepTrendView.buildSleepNights(
             metricIndex: metricIndex, sourcePrefs: sourcePrefs,
-            lookbackDays: 2, calendar: cal
+            lookbackDays: 14, calendar: cal
         )
         let lastNight = nights.last
+
+        // Compute sleep score for last night
+        let recentBedtimes = nights.suffix(7).compactMap { night -> Date? in
+            night.stages.filter { ["Deep", "Core", "REM"].contains($0.stage) }
+                .map(\.start).min()
+        }
+        let sleepResult: SleepScore.Result? = lastNight.map {
+            SleepScore.fromStages(stages: $0.stages, recentBedtimes: recentBedtimes)
+        }
+
+        let badge: DashboardTile<SleepTrendView>.Badge? = sleepResult.map {
+            .init(text: "\($0.total)", color: sleepScoreColor($0.total))
+        }
 
         return DashboardTile(
             title: "SLEEP",
             value: lastNight.map { formatMinutes($0.asleep) } ?? "--",
             detail: lastNight.map { formatMinutes($0.inBed) + " in bed" },
-            period: "Last night"
+            period: "Last night",
+            badge: badge
         ) {
             SleepTrendView()
         }
@@ -227,6 +241,15 @@ struct HomeTab: View {
     }
 
     // MARK: - Helpers
+
+    private func sleepScoreColor(_ score: Int) -> Color {
+        switch score {
+        case 75...: return .green
+        case 50...: return .cyan
+        case 25...: return .orange
+        default:    return .red
+        }
+    }
 
     private func formatMinutes(_ m: Double) -> String {
         let h = Int(m) / 60, min = Int(m) % 60

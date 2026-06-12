@@ -136,6 +136,36 @@ struct AlgorithmsView: View {
                 )
             }
 
+            // Sleep Score
+            Section("Sleep Score (from Apple Watch)") {
+                AlgorithmCard(
+                    name: "Nightly Sleep Score",
+                    id: "sleep_score_v1",
+                    inputs: "Sleep stages (Deep, Core, REM, Awake) with timestamps, recent bedtimes",
+                    output: "Score 0–100 with Duration (50pts), Consistency (30pts), Interruptions (20pts) breakdown",
+                    method: """
+                    Modeled after Apple's watchOS sleep score methodology.
+
+                    Duration (50 points):
+                      Target: 7h 50m of sleep. Non-linear penalty for undersleeping: \
+                      first hour costs ~6pts, second hour costs ~13pts. \
+                      Quality penalties: -5pts if deep sleep < 10%, -5pts if REM < 15%.
+
+                    Consistency (30 points):
+                      Compares tonight's bedtime to your rolling average. \
+                      Going to bed late: ~1pt per 5min after 15min late. \
+                      Going to bed very early (>60min): ~1pt per 30min, max -6pts. \
+                      Up to 60min early: no penalty.
+
+                    Interruptions (20 points):
+                      Awake time: no penalty up to 11min, then ~1pt per 4min. \
+                      Wake events: no penalty for ≤2, then ~1pt per 2 events.
+                    """,
+                    citation: "Apple: How Apple Watch's Sleep Score Is Calculated (the5krunner.com, 2025). NSF sleep duration guidelines. AASM scoring methodology.",
+                    journal: "Hirshkowitz M et al. Sleep Health. 2015;1(1):40-43 | Buysse DJ et al. PSQI. Psychiatry Res. 1989;28(2):193-213"
+                )
+            }
+
             // Health Category Trends
             Section("Health Category Trends (from Apple Watch)") {
                 AlgorithmCard(
