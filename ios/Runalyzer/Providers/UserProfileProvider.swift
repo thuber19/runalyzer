@@ -12,9 +12,14 @@ class UserProfileProvider: ObservableObject {
 
     private let db: AppDatabase
 
+    /// Whether a profile record exists in the database (i.e. has been saved at least once).
+    private(set) var hasStoredProfile: Bool = false
+
     init(db: AppDatabase? = nil) {
         self.db = db ?? AppDatabase.shared
-        self.profile = loadFromDB()
+        let loaded = loadFromDB()
+        self.profile = loaded.profile
+        self.hasStoredProfile = loaded.exists
     }
 
     // MARK: - Save
@@ -26,6 +31,7 @@ class UserProfileProvider: ObservableObject {
                 try record.save(database)
             }
             self.profile = profile
+            self.hasStoredProfile = true
         } catch {
             AppLogger.storage.error("Failed to save UserProfile: \(error.localizedDescription)")
         }
@@ -33,22 +39,28 @@ class UserProfileProvider: ObservableObject {
 
     // MARK: - Load
 
-    private func loadFromDB() -> UserProfile {
+    private func loadFromDB() -> (profile: UserProfile, exists: Bool) {
         do {
             if let record = try db.dbQueue.read({ try UserProfileRecord.fetchOne($0, key: 1) }) {
-                return record.toModel()
+                return (record.toModel(), true)
             }
         } catch {
             AppLogger.storage.error("Failed to load UserProfile: \(error.localizedDescription)")
         }
-        return .default
+        return (.default, false)
     }
 
     // MARK: - HealthKit Auto-Fill
 
-    /// Fetches biological characteristics from HealthKit and fills in any fields
-    /// that the user hasn't manually set. Does NOT overwrite manual entries.
+    /// Seeds the profile from HealthKit on first launch only (no saved profile yet).
     func autoFillFromHealthKit() {
+        guard !hasStoredProfile else { return }
+        fetchFromHealthKit()
+    }
+
+    /// Fetches biological characteristics from HealthKit and updates the profile.
+    /// Called automatically on first launch, or manually via the "Fetch from Apple Health" button.
+    func fetchFromHealthKit() {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         let store = HKHealthStore()
         var updated = profile
@@ -74,7 +86,7 @@ class UserProfileProvider: ObservableObject {
             }
             // Save if anything changed
             if updated != self.profile {
-                AppLogger.health.info("UserProfile auto-filled from HealthKit")
+                AppLogger.health.info("UserProfile updated from HealthKit")
                 self.save(updated)
             }
         }

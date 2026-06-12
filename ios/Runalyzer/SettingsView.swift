@@ -35,7 +35,7 @@ struct SettingsView: View {
 
                 // User Profile (for body composition)
                 Section("Profile") {
-                    NavigationLink(destination: ScaleSettingsView()) {
+                    NavigationLink(destination: BodyProfileView()) {
                         Label("Body Profile", systemImage: "person.fill")
                     }
                     .listRowBackground(Color(hex: 0x16213e))

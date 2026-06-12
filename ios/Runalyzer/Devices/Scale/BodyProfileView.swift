@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct ScaleSettingsView: View {
+struct BodyProfileView: View {
     @EnvironmentObject var profileProvider: UserProfileProvider
     @State private var profile: UserProfile = .default
     @State private var saved = false
@@ -76,6 +76,24 @@ struct ScaleSettingsView: View {
                 Text("Heart Rate Zones")
             } footer: {
                 Text("Based on ACSM Guidelines for Exercise Testing and Prescription (11th ed., 2021). Zones are percentages of max HR. Override individual zone boundaries or leave blank for defaults.")
+            }
+
+            Section {
+                Button(action: {
+                    profileProvider.fetchFromHealthKit()
+                    // Reload local state after a short delay to pick up async height fetch
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        profile = profileProvider.profile
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "heart.fill").foregroundColor(.red)
+                        Text("Fetch from Apple Health")
+                    }
+                }
+                .listRowBackground(Color(hex: 0x16213e))
+            } footer: {
+                Text("Updates height, age, and sex from Apple Health. This overwrites the current values above.")
             }
 
             Section {

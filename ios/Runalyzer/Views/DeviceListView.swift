@@ -98,7 +98,7 @@ struct DeviceListView: View {
         if driver is IMUSensorDriver {
             IMUSettingsView()
         } else if driver is QNScaleDriver {
-            ScaleSettingsView()
+            BodyProfileView()
         } else {
             Text("No settings available for this device")
         }
