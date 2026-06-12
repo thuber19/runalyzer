@@ -35,6 +35,8 @@ struct CategoryDashboardView: View {
     let icon: String
     let color: Color
     let metrics: [MetricDefinition]
+    /// Which measurement type to query. Defaults to `.metric` (HealthKit imports).
+    var queryMeasurementType: MeasurementType = .metric
 
     @EnvironmentObject var measurementStore: MeasurementStore
     @EnvironmentObject var sourcePrefs: SourcePreferenceStore
@@ -83,19 +85,19 @@ struct CategoryDashboardView: View {
         let monthAgo = cal.date(byAdding: .day, value: -30, to: today) ?? today
 
         return ForEach(metrics) { metric in
-            let todayPoints = metricIndex.query(type: metric.id, measurementType: .metric,
+            let todayPoints = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                                 from: today, to: Date(), filter: sourcePrefs)
             let todayVal = dailyValue(todayPoints, metric: metric)
 
             // 7-day average for comparison badge
-            let weekPoints = metricIndex.query(type: metric.id, measurementType: .metric,
+            let weekPoints = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                                from: weekAgo, to: today, filter: sourcePrefs)
             let weekDaily = toDailyValues(weekPoints, metric: metric)
             let weekAvg = weekDaily.isEmpty ? nil :
                 weekDaily.map(\.value).reduce(0, +) / Double(weekDaily.count)
 
             // 30-day sparkline
-            let monthPoints = metricIndex.query(type: metric.id, measurementType: .metric,
+            let monthPoints = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                                 from: monthAgo, to: Date(), filter: sourcePrefs)
             let monthDaily = toDailyValues(monthPoints, metric: metric)
             let sparkline = monthDaily.map(\.value)
@@ -178,7 +180,7 @@ struct CategoryDashboardView: View {
         let lookback = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) ?? Date()
 
         return ForEach(metrics) { metric in
-            let points = metricIndex.query(type: metric.id, measurementType: .metric,
+            let points = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                            from: lookback, to: Date(), filter: sourcePrefs)
             let daily = toDailyValues(points, metric: metric)
             let sparkline = daily.map(\.value)
@@ -230,7 +232,7 @@ struct CategoryDashboardView: View {
 
         var inputs: [HealthScore.MetricInput] = []
         for metric in metrics {
-            let points = metricIndex.query(type: metric.id, measurementType: .metric,
+            let points = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                            from: historyStart, to: Date(), filter: sourcePrefs)
             let dailyValues = toDailyValues(points, metric: metric)
             guard !dailyValues.isEmpty else { continue }
@@ -308,7 +310,7 @@ struct CategoryDashboardView: View {
             } else {
                 lookback = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) ?? Date()
             }
-            let points = metricIndex.query(type: metric.id, measurementType: .metric,
+            let points = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                            from: lookback, to: Date(), filter: sourcePrefs)
             let val: Double
             if timeRange.isDaily {
@@ -338,13 +340,7 @@ struct CategoryDashboardView: View {
 
     private func percentChange(_ values: [Double]) -> Double? {
         guard values.count >= 4 else { return nil }
-        let mid = values.count / 2
-        let firstHalf = Array(values[..<mid])
-        let secondHalf = Array(values[mid...])
-        let avgFirst = firstHalf.reduce(0, +) / Double(firstHalf.count)
-        let avgSecond = secondHalf.reduce(0, +) / Double(secondHalf.count)
-        guard avgFirst != 0 else { return nil }
-        return ((avgSecond - avgFirst) / avgFirst) * 100
+        return HealthScore.regressionPercentChange(values)
     }
 }
 
@@ -378,6 +374,54 @@ extension CategoryDashboardView {
                                  unit: "bpm", color: .orange, aggregation: .latest,
                                  direction: .lowerIsBetter, weight: 0.10),
             ]
+        )
+    }
+
+    /// Blood work / lab results category
+    static func bloodWork() -> CategoryDashboardView {
+        CategoryDashboardView(
+            title: "Blood Work",
+            icon: "cross.case",
+            color: .red,
+            metrics: [
+                MetricDefinition(id: DataType.glucose, title: "Glucose",
+                                 unit: "mg/dL", color: .orange, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.15),
+                MetricDefinition(id: DataType.hemoglobinA1C, title: "HbA1C",
+                                 unit: "%", color: .red, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.15),
+                MetricDefinition(id: DataType.ldlCholesterol, title: "LDL",
+                                 unit: "mg/dL", color: .red, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.15),
+                MetricDefinition(id: DataType.hdlCholesterol, title: "HDL",
+                                 unit: "mg/dL", color: .green, aggregation: .latest,
+                                 direction: .higherIsBetter, weight: 0.10),
+                MetricDefinition(id: DataType.triglycerides, title: "Triglycerides",
+                                 unit: "mg/dL", color: .yellow, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.10),
+                MetricDefinition(id: DataType.totalCholesterol, title: "Total Chol.",
+                                 unit: "mg/dL", color: .orange, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.05),
+                MetricDefinition(id: DataType.ferritin, title: "Ferritin",
+                                 unit: "ng/mL", color: .brown, aggregation: .latest,
+                                 direction: .higherIsBetter, weight: 0.05),
+                MetricDefinition(id: DataType.vitaminD, title: "Vitamin D",
+                                 unit: "ng/mL", color: .yellow, aggregation: .latest,
+                                 direction: .higherIsBetter, weight: 0.05),
+                MetricDefinition(id: DataType.hemoglobin, title: "Hemoglobin",
+                                 unit: "g/dL", color: .red, aggregation: .latest,
+                                 direction: .higherIsBetter, weight: 0.05),
+                MetricDefinition(id: DataType.creatinine, title: "Creatinine",
+                                 unit: "mg/dL", color: .purple, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.05),
+                MetricDefinition(id: DataType.tsh, title: "TSH",
+                                 unit: "mIU/L", color: .cyan, aggregation: .latest,
+                                 weight: 0.05),
+                MetricDefinition(id: DataType.crp, title: "CRP",
+                                 unit: "mg/L", color: .pink, aggregation: .latest,
+                                 direction: .lowerIsBetter, weight: 0.05),
+            ],
+            queryMeasurementType: .labResults
         )
     }
 

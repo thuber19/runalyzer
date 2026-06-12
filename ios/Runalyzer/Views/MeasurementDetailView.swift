@@ -52,6 +52,7 @@ struct MeasurementDetailView: View {
         case .metric:       metricSummary
         case .bodyComp:     bodyCompSummary
         case .derived:      derivedSummary
+        case .labResults:   labResultsSummary
         default:            EmptyView()
         }
     }
@@ -181,6 +182,29 @@ struct MeasurementDetailView: View {
         case "InBed": return .gray
         default:      return .purple
         }
+    }
+
+    // MARK: - Lab Results Summary
+
+    private var labResultsSummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("LAB RESULTS").font(.caption2).foregroundColor(.gray)
+            ForEach(dataPoints.filter { $0.role == .primary }) { p in
+                HStack {
+                    Text(DataType.labDisplayName(p.type))
+                        .font(.subheadline).foregroundColor(.gray)
+                    Spacer()
+                    Text(String(format: p.value == p.value.rounded() ? "%.0f" : "%.1f", p.value))
+                        .font(.subheadline.bold().monospacedDigit())
+                    Text(p.unit)
+                        .font(.caption2).foregroundColor(.gray)
+                }
+            }
+            sourceRow
+        }
+        .padding()
+        .background(Color(hex: 0x16213e))
+        .cornerRadius(12)
     }
 
     // MARK: - HK Workout Summary
@@ -705,6 +729,22 @@ struct MeasurementDetailView: View {
         case DataType.recoveryBaselineSDNN: return "30d Avg SDNN"
         case DataType.recoveryBaselineRHR: return "30d Avg RHR"
         case DataType.recoveryConfidence: return "Confidence"
+        case DataType.glucose: return "Glucose"
+        case DataType.hemoglobinA1C: return "HbA1C"
+        case DataType.totalCholesterol: return "Total Cholesterol"
+        case DataType.ldlCholesterol: return "LDL"
+        case DataType.hdlCholesterol: return "HDL"
+        case DataType.triglycerides: return "Triglycerides"
+        case DataType.ferritin: return "Ferritin"
+        case DataType.vitaminD: return "Vitamin D"
+        case DataType.iron: return "Iron"
+        case DataType.hemoglobin: return "Hemoglobin"
+        case DataType.creatinine: return "Creatinine"
+        case DataType.tsh: return "TSH"
+        case DataType.cortisol: return "Cortisol"
+        case DataType.testosterone: return "Testosterone"
+        case DataType.vitaminB12: return "Vitamin B12"
+        case DataType.crp: return "CRP"
         default: return type.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

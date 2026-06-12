@@ -11,6 +11,8 @@ struct HomeTab: View {
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
     private let cal = Calendar.current
 
+    @State private var showLabEntry = false
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -22,11 +24,23 @@ struct HomeTab: View {
                     HStack(spacing: 12) { activityTile; habitsTile }
 
                     HStack(spacing: 12) { bodyCompTile; workoutsTile }
+
+                    labResultsTile
                 }
                 .padding()
             }
             .background(Color(hex: 0x1a1a2e))
             .navigationTitle("Home")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showLabEntry = true } label: {
+                        Image(systemName: "cross.case")
+                    }
+                }
+            }
+            .sheet(isPresented: $showLabEntry) {
+                LabResultsEntrySheet()
+            }
         }
     }
 
@@ -314,6 +328,64 @@ struct HomeTab: View {
         ) {
             WorkoutAnalyticsView()
         }
+    }
+
+    // MARK: - Lab Results
+
+    private var labResultsTile: some View {
+        let labMeasurements = measurementStore.measurements(ofType: .labResults)
+        let latest = labMeasurements.max(by: { $0.date < $1.date })
+        let dp = latest.map { measurementStore.dataPoints(for: $0.id) } ?? []
+
+        let glucose = dp.first(where: { $0.type == DataType.glucose })
+        let ldl = dp.first(where: { $0.type == DataType.ldlCholesterol })
+        let hdl = dp.first(where: { $0.type == DataType.hdlCholesterol })
+
+        return CustomTile {
+            CategoryDashboardView.bloodWork()
+        } content: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("LABS").font(.caption2).foregroundColor(.gray)
+                if let g = glucose {
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(String(format: "%.0f", g.value)).font(.title.bold().monospacedDigit())
+                        Text("mg/dL").font(.caption2).foregroundColor(.gray)
+                    }
+                    Text("Glucose").font(.caption2).foregroundColor(.orange)
+                } else if !dp.isEmpty {
+                    // Show first available value
+                    let first = dp.first!
+                    HStack(alignment: .firstTextBaseline, spacing: 2) {
+                        Text(String(format: "%.0f", first.value)).font(.title.bold().monospacedDigit())
+                        Text(first.unit).font(.caption2).foregroundColor(.gray)
+                    }
+                    Text(DataType.labDisplayName(first.type)).font(.caption2).foregroundColor(.orange)
+                } else {
+                    Text("--").font(.title.bold()).foregroundColor(.gray)
+                    Text("No results").font(.caption2).foregroundColor(.gray)
+                }
+                if let l = ldl, let h = hdl {
+                    Text(String(format: "LDL %.0f · HDL %.0f", l.value, h.value))
+                        .font(.caption2).foregroundColor(.gray)
+                }
+                Spacer()
+                if let m = latest {
+                    Text(Self.relativeDateLabel(m.date))
+                        .font(.caption2).foregroundColor(.gray.opacity(0.6))
+                } else {
+                    Text("Tap + to add").font(.caption2).foregroundColor(.gray.opacity(0.6))
+                }
+            }
+        }
+    }
+
+    private static func relativeDateLabel(_ date: Date) -> String {
+        let days = Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? 0
+        if days == 0 { return "Today" }
+        if days == 1 { return "Yesterday" }
+        if days < 30 { return "\(days)d ago" }
+        let months = days / 30
+        return months == 1 ? "1 month ago" : "\(months) months ago"
     }
 
     // MARK: - Helpers

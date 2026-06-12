@@ -94,11 +94,12 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
     /// Display name for the measurement type (used in list rows when DataPoints aren't loaded).
     var typeName: String {
         switch type {
-        case .bodyComp:  return "Body Composition"
-        case .derived:   return "Derived"
-        case .metric:    return "Metric"
-        case .workout:   return "IMU Recording"
-        case .hkWorkout: return "Workout"
+        case .bodyComp:    return "Body Composition"
+        case .derived:     return "Derived"
+        case .metric:      return "Metric"
+        case .workout:     return "IMU Recording"
+        case .hkWorkout:   return "Workout"
+        case .labResults:  return "Lab Results"
         }
     }
 
@@ -193,6 +194,12 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
                 return String(format: "Sleep %.0fh %02.0fm · %d stages", totalMin / 60, totalMin.truncatingRemainder(dividingBy: 60), sleepPoints.count)
             }
             return dataPoints.first.map { "\($0.type): \(String(format: "%.1f", $0.value))" } ?? "Metric"
+        case .labResults:
+            let primary = dataPoints.filter { $0.role == .primary }
+            let parts = primary.prefix(3).map { p in
+                String(format: "%.0f %@ %@", p.value, p.unit, DataType.labDisplayName(p.type))
+            }
+            return parts.isEmpty ? "Lab Results" : parts.joined(separator: " · ")
         }
     }
 
@@ -204,11 +211,12 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
 
     var icon: String {
         switch type {
-        case .workout: return "figure.run"
-        case .bodyComp: return "scalemass"
-        case .derived: return "function"
-        case .metric: return "waveform.path.ecg"
-        case .hkWorkout: return "heart.circle"
+        case .workout:    return "figure.run"
+        case .bodyComp:   return "scalemass"
+        case .derived:    return "function"
+        case .metric:     return "waveform.path.ecg"
+        case .hkWorkout:  return "heart.circle"
+        case .labResults: return "cross.case"
         }
     }
 
@@ -246,6 +254,7 @@ enum MeasurementType: String, Codable, Sendable {
     case derived = "derived"        // algorithm output (stress, enrichment)
     case metric = "metric"          // raw imported metrics (HRV, RHR, HR, etc.)
     case hkWorkout = "hk_workout"   // HealthKit workout (time-bounded event with embedded time-series)
+    case labResults = "lab_results" // manual blood work / lab results entry
 }
 
 // MARK: - Source string convention helpers
@@ -347,6 +356,47 @@ enum DataType {
     static let workoutCalories  = "workout_calories"             // kcal
     static let workoutAvgHR     = "workout_avg_hr"               // bpm
     static let workoutMaxHR     = "workout_max_hr"               // bpm
+
+    // Blood work / lab results
+    static let glucose          = "glucose"               // mg/dL — fasting blood glucose
+    static let hemoglobinA1C    = "hemoglobin_a1c"        // % — glycated hemoglobin
+    static let totalCholesterol = "total_cholesterol"     // mg/dL
+    static let ldlCholesterol   = "ldl_cholesterol"       // mg/dL
+    static let hdlCholesterol   = "hdl_cholesterol"       // mg/dL
+    static let triglycerides    = "triglycerides"          // mg/dL
+    static let ferritin         = "ferritin"               // ng/mL — iron storage
+    static let vitaminD         = "vitamin_d"              // ng/mL
+    static let iron             = "iron"                   // mcg/dL
+    static let hemoglobin       = "hemoglobin"             // g/dL
+    static let creatinine       = "creatinine"             // mg/dL — kidney function
+    static let tsh              = "tsh"                    // mIU/L — thyroid
+    static let cortisol         = "cortisol"               // mcg/dL — stress hormone
+    static let testosterone     = "testosterone"           // ng/dL
+    static let vitaminB12       = "vitamin_b12"            // pg/mL
+    static let crp              = "crp"                    // mg/L — inflammation marker
+
+    /// Display name for lab result data types.
+    static func labDisplayName(_ type: String) -> String {
+        switch type {
+        case glucose:          return "Glucose"
+        case hemoglobinA1C:    return "HbA1C"
+        case totalCholesterol: return "Total Chol."
+        case ldlCholesterol:   return "LDL"
+        case hdlCholesterol:   return "HDL"
+        case triglycerides:    return "Triglycerides"
+        case ferritin:         return "Ferritin"
+        case vitaminD:         return "Vitamin D"
+        case iron:             return "Iron"
+        case hemoglobin:       return "Hemoglobin"
+        case creatinine:       return "Creatinine"
+        case tsh:              return "TSH"
+        case cortisol:         return "Cortisol"
+        case testosterone:     return "Testosterone"
+        case vitaminB12:       return "Vitamin B12"
+        case crp:              return "CRP"
+        default:               return type.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
 
     // Recovery score (recovery_v1) — overnight HRV + RHR, z-score normalized
     static let recoveryIndex        = "recovery_index"          // 0–100 (higher = better recovered)

@@ -10,6 +10,7 @@ private enum DataFilter: String, CaseIterable {
     case bodyComp   = "Body Comp"
     case metrics    = "Metrics"
     case recovery   = "Recovery"
+    case labs       = "Labs"
 }
 
 struct DataTab: View {
@@ -26,6 +27,7 @@ struct DataTab: View {
         case workout(Workout)
         case bodyComp(SensorMeasurement)
         case derived(SensorMeasurement)
+        case labResults(SensorMeasurement)
 
         var id: String {
             switch self {
@@ -34,6 +36,7 @@ struct DataTab: View {
             case .workout(let w): return "w-\(w.id.uuidString)"
             case .bodyComp(let m): return "bc-\(m.id.uuidString)"
             case .derived(let m): return "d-\(m.id.uuidString)"
+            case .labResults(let m): return "lr-\(m.id.uuidString)"
             }
         }
 
@@ -43,6 +46,7 @@ struct DataTab: View {
             case .workout(let w): return w.startDate
             case .bodyComp(let m): return m.date
             case .derived(let m): return m.date
+            case .labResults(let m): return m.date
             }
         }
     }
@@ -76,6 +80,13 @@ struct DataTab: View {
             for m in measurementStore.measurements(ofType: .derived) {
                 let day = cal.startOfDay(for: m.date)
                 rowsByDay[day, default: []].append(.derived(m))
+            }
+        }
+
+        if filter == .all || filter == .labs {
+            for m in measurementStore.measurements(ofType: .labResults) {
+                let day = cal.startOfDay(for: m.date)
+                rowsByDay[day, default: []].append(.labResults(m))
             }
         }
 
@@ -161,7 +172,7 @@ struct DataTab: View {
         switch row {
         case .workout(let w):
             workoutStore.delete(w.id)
-        case .bodyComp(let m), .derived(let m):
+        case .bodyComp(let m), .derived(let m), .labResults(let m):
             measurementStore.delete(m.id)
         case .metric(_, _, _, _):
             break  // Metric rows are aggregates — delete via Delete All
@@ -187,6 +198,9 @@ struct DataTab: View {
             if !ids.isEmpty { measurementStore.deleteBatch(ids) }
         case .recovery:
             let ids = Set(measurementStore.measurements(ofType: .derived).map(\.id))
+            if !ids.isEmpty { measurementStore.deleteBatch(ids) }
+        case .labs:
+            let ids = Set(measurementStore.measurements(ofType: .labResults).map(\.id))
             if !ids.isEmpty { measurementStore.deleteBatch(ids) }
         }
     }
@@ -249,6 +263,19 @@ struct DataTab: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Recovery").font(.subheadline)
                         Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
+                    }
+                }
+            }
+
+        case .labResults(let m):
+            NavigationLink(destination: MeasurementDetailView(measurement: m)) {
+                HStack(spacing: 12) {
+                    Image(systemName: "cross.case")
+                        .foregroundColor(.red)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Lab Results").font(.subheadline)
+                        Text(m.summary).font(.caption).foregroundColor(.gray)
                     }
                 }
             }
@@ -455,10 +482,11 @@ struct DataTab: View {
 fileprivate extension DataTab.DataRow {
     var sortOrder: Int {
         switch self {
-        case .workout:  return 0
-        case .metric:   return 1
-        case .bodyComp: return 2
-        case .derived:  return 3
+        case .workout:    return 0
+        case .metric:     return 1
+        case .bodyComp:   return 2
+        case .derived:    return 3
+        case .labResults: return 4
         }
     }
 }
