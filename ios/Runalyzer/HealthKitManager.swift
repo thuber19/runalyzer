@@ -137,8 +137,6 @@ class HealthKitManager: ObservableObject {
         types.insert(HKObjectType.workoutType())
         // Characteristic types (sex, DOB) don't need authorization — they're always readable
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { types.insert(sleep) }
-        // Note: Apple's sleep score (watchOS 26) is NOT exposed via HealthKit as of iOS 18.
-        // HKScoredAssessmentTypeIdentifier only has PHQ-9 and GAD-7 (mental health).
         return types
     }()
 
@@ -934,91 +932,4 @@ class HealthKitManager: ObservableObject {
     }
     #endif
 
-    // MARK: - Sleep Score Probe
-
-    /// Attempt to read Apple's computed sleep score via HKScoredAssessment.
-    /// This API may not be available on all iOS versions.
-    func probeSleepScore(predicate: NSPredicate? = nil,
-                         completion: @escaping (String) -> Void) {
-        let pred = predicate ?? {
-            let yesterday = Calendar.current.date(byAdding: .day, value: -2, to: Date())!
-            return HKQuery.predicateForSamples(withStart: yesterday, end: Date(), options: .strictStartDate)
-        }()
-
-        var output = "[Sleep Score Probe]\n"
-
-        // HKScoredAssessmentTypeIdentifier only has PHQ-9 and GAD-7 (mental health).
-        // Apple's sleep score is NOT in HKScoredAssessment as of iOS 18 / watchOS 26.
-        output += "  HKScoredAssessment: only PHQ-9/GAD-7 — no sleep score identifier\n\n"
-
-        // Scan sleep-related quantity and category types for anything that might contain scores
-        output += "  Scanning sleep-related HealthKit types...\n\n"
-
-        let subGroup = DispatchGroup()
-        let serialQueue = DispatchQueue(label: "sleepProbe")
-
-        // Quantity types that might carry sleep quality data
-        let quantityIDs: [(String, HKQuantityTypeIdentifier, HKUnit)] = [
-            ("appleSleepingBreathingDisturbances", .appleSleepingBreathingDisturbances,
-             HKUnit(from: "count/hr")),
-        ]
-
-        for (name, id, unit) in quantityIDs {
-            subGroup.enter()
-            guard let qType = HKQuantityType.quantityType(forIdentifier: id) else {
-                serialQueue.sync { output += "  [\(name)] Type not available\n" }
-                subGroup.leave()
-                continue
-            }
-            let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
-            let q = HKSampleQuery(sampleType: qType, predicate: pred, limit: 5, sortDescriptors: [sort]) { _, results, error in
-                var part = "  [\(name)] "
-                let samples = results as? [HKQuantitySample] ?? []
-                part += "\(samples.count) samples"
-                if let e = error { part += " error: \(e.localizedDescription)" }
-                part += "\n"
-                for s in samples {
-                    let val = s.quantity.doubleValue(for: unit)
-                    part += "    \(s.startDate) → \(s.endDate): \(String(format: "%.2f", val)) \(unit) [\(s.sourceRevision.source.name)]\n"
-                }
-                serialQueue.sync { output += part }
-                subGroup.leave()
-            }
-            self.store.execute(q)
-        }
-
-        // Also dump all unique sample types from the last 2 days to find hidden score types
-        subGroup.enter()
-        let allTypesQuery = HKSampleQuery(
-            sampleType: HKObjectType.categoryType(forIdentifier: .sleepAnalysis)!,
-            predicate: pred, limit: HKObjectQueryNoLimit,
-            sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)]
-        ) { _, results, _ in
-            let samples = results ?? []
-            var part = "  [All sleep samples] \(samples.count) total\n"
-            part += "  Sample types found:\n"
-            let types = Set(samples.map { "\(type(of: $0))" })
-            for t in types.sorted() { part += "    - \(t)\n" }
-            // Show metadata of first few samples — Apple may store score in metadata
-            for (i, s) in samples.prefix(5).enumerated() {
-                part += "  [\(i)] type: \(type(of: s)) date: \(s.startDate)\n"
-                if let meta = s.metadata {
-                    for (k, v) in meta {
-                        part += "       meta[\(k)] = \(v)\n"
-                    }
-                } else {
-                    part += "       (no metadata)\n"
-                }
-            }
-            part += "\n"
-            serialQueue.sync { output += part }
-            subGroup.leave()
-        }
-        store.execute(allTypesQuery)
-
-        subGroup.notify(queue: .global()) {
-            output += "  Done. If no score found, Apple likely keeps it private to the Health app.\n\n"
-            completion(output)
-        }
-    }
 }
