@@ -342,9 +342,8 @@ struct HomeTab: View {
                         Text("mg/dL").font(.caption2).foregroundColor(.gray)
                     }
                     Text("Glucose").font(.caption2).foregroundColor(.orange)
-                } else if !dp.isEmpty {
+                } else if let first = dp.first {
                     // Show first available value
-                    let first = dp.first!
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
                         Text(String(format: "%.0f", first.value)).font(.title.bold().monospacedDigit())
                         Text(first.unit).font(.caption2).foregroundColor(.gray)

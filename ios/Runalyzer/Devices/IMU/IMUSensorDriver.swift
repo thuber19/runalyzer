@@ -113,7 +113,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
         guard let data = characteristic.value else { return }
         // Debug: log which characteristic updated
         if characteristic.uuid != imuCharUUID {
-            print("IMU didUpdateValue: \(characteristic.uuid) (\(data.count) bytes)")
+            AppLogger.imu.debug("didUpdateValue: \(characteristic.uuid) (\(data.count) bytes)")
         }
         switch characteristic.uuid {
         case imuCharUUID:

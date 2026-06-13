@@ -68,6 +68,11 @@ struct MetricIndex {
             .sorted { $0.date < $1.date }
     }
 
+    /// Aggregate daily metric summaries — one row per (day, type) with count/avg/min/max.
+    func dailyMetricSummaries() -> [MeasurementStore.DailyMetricSummary] {
+        store.dailyMetricSummaries()
+    }
+
     /// Find the single .metric measurement for a given day and DataPoint type.
     /// Used by HealthKitMetricProvider for intraday upsert.
     func metricMeasurement(forDay date: Date, containingType type: String) -> SensorMeasurement? {

@@ -171,6 +171,51 @@ enum SleepScore {
         }
     }
 
+    // MARK: - Stage Summary (for detail view)
+
+    /// Summary of sleep stages computed from raw DataPoints.
+    struct StageSummary {
+        let asleepMinutes: Double
+        let deepMinutes: Double
+        let remMinutes: Double
+        /// Per-stage breakdown: (stageName, minutes), only stages with > 0 minutes.
+        let stageBreakdown: [(name: String, minutes: Double)]
+    }
+
+    /// Compute a stage summary from raw sleep DataPoints.
+    /// Handles Watch vs iPhone source dedup: if Watch staged data (Core/REM/Deep) exists,
+    /// only those sources are used (plus Awake from any source) to avoid double-counting.
+    static func stageSummary(from sleepPoints: [DataPoint]) -> StageSummary {
+        let hasStages = sleepPoints.contains { ["Core", "Deep", "REM"].contains($0.unit) }
+        let filtered: [DataPoint]
+        if hasStages {
+            let stagedSources = Set(sleepPoints.filter { ["Core", "Deep", "REM"].contains($0.unit) }
+                .map { $0.source })
+            filtered = sleepPoints.filter { stagedSources.contains($0.source) || $0.unit == "Awake" }
+        } else {
+            filtered = sleepPoints
+        }
+
+        let stages = filtered.compactMap { p -> (stage: String, minutes: Double)? in
+            guard let end = p.endTimestamp else { return nil }
+            return (stage: p.unit, minutes: end.timeIntervalSince(p.timestamp) / 60)
+        }
+
+        let stageNames = ["Deep", "Core", "REM", "Awake", "InBed", "Asleep"]
+        let stageBreakdown: [(name: String, minutes: Double)] = stageNames.compactMap { name in
+            let mins = stages.filter { $0.stage == name }.reduce(0) { $0 + $1.minutes }
+            return mins > 0 ? (name: name, minutes: mins) : nil
+        }
+
+        let asleepMin = stages.filter { ["Deep", "Core", "REM", "Asleep"].contains($0.stage) }
+            .reduce(0) { $0 + $1.minutes }
+        let deepMin = stages.filter { $0.stage == "Deep" }.reduce(0) { $0 + $1.minutes }
+        let remMin = stages.filter { $0.stage == "REM" }.reduce(0) { $0 + $1.minutes }
+
+        return StageSummary(asleepMinutes: asleepMin, deepMinutes: deepMin,
+                            remMinutes: remMin, stageBreakdown: stageBreakdown)
+    }
+
     // MARK: - Convenience: Compute from sleep stages
 
     /// Compute sleep score from raw stage intervals (as produced by SleepTrendView).

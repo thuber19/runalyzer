@@ -149,10 +149,15 @@ class HealthKitManager: ObservableObject {
     }
 
     func requestAuthorization() {
-        guard isAvailable else { print("HealthKit not available"); return }
+        guard isAvailable else { AppLogger.health.warning("HealthKit not available"); return }
         store.requestAuthorization(toShare: writeTypes, read: readTypes) { success, error in
-            print("HealthKit auth result: \(success), error: \(String(describing: error))")
+            AppLogger.health.info("HealthKit auth result: \(success)")
             DispatchQueue.main.async {
+                if let error {
+                    AppLogger.health.error("HealthKit auth error: \(error.localizedDescription)")
+                    self.authorized = false
+                    return
+                }
                 // Always mark as authorized after prompt — Apple returns false
                 // even when user grants read access (privacy design)
                 self.authorized = true
@@ -256,36 +261,45 @@ class HealthKitManager: ObservableObject {
         let start = cal.startOfDay(for: Date())
         let end = Date()
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let syncQueue = DispatchQueue(label: "com.runalyzer.healthSummary")
         var summary = HealthSummary()
         let group = DispatchGroup()
 
         group.enter()
         fetchCumulativeStat(.stepCount, predicate: predicate) { val in
-            summary.steps = Int(val); group.leave()
+            syncQueue.sync { summary.steps = Int(val) }
+            group.leave()
         }
         group.enter()
         fetchCumulativeStat(.distanceWalkingRunning, predicate: predicate) { val in
-            summary.distanceMeters = val; group.leave()
+            syncQueue.sync { summary.distanceMeters = val }
+            group.leave()
         }
         group.enter()
         fetchCumulativeStat(.activeEnergyBurned, predicate: predicate) { val in
-            summary.calories = val; group.leave()
+            syncQueue.sync { summary.calories = val }
+            group.leave()
         }
         group.enter()
         fetchSamples(.heartRate, predicate: predicate) { samples in
-            if let last = samples.last {
-                summary.latestHR = last.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
-            }
-            if !samples.isEmpty {
-                let hrs = samples.map { $0.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute())) }
-                summary.avgHR = hrs.reduce(0, +) / Double(hrs.count)
-                summary.minHR = hrs.min() ?? 0
-                summary.maxHR = hrs.max() ?? 0
+            syncQueue.sync {
+                if let last = samples.last {
+                    summary.latestHR = last.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+                }
+                if !samples.isEmpty {
+                    let hrs = samples.map { $0.quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute())) }
+                    summary.avgHR = hrs.reduce(0, +) / Double(hrs.count)
+                    summary.minHR = hrs.min() ?? 0
+                    summary.maxHR = hrs.max() ?? 0
+                }
             }
             group.leave()
         }
 
-        group.notify(queue: .main) { completion(summary) }
+        group.notify(queue: .main) {
+            let result = syncQueue.sync { summary }
+            completion(result)
+        }
     }
 
     // MARK: - Fetch Detailed Data for a Workout

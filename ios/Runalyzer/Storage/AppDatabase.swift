@@ -292,29 +292,29 @@ final class AppDatabase {
                 t.column("sortOrder", .integer).notNull().defaults(to: 0)
             }
 
-            // Seed default drink templates
-            let defaults: [(name: String, category: String, volumeMl: Int,
+            // Seed default drink templates (deterministic IDs for idempotency)
+            let defaults: [(id: String, name: String, category: String, volumeMl: Int,
                             caffeineMg: Int, alcoholPct: Double, icon: String)] = [
-                ("Water (Glass)",  "water",  250, 0,   0,    "drop.fill"),
-                ("Water (Bottle)", "water",  500, 0,   0,    "waterbottle.fill"),
-                ("Espresso",       "coffee", 30,  63,  0,    "cup.and.saucer.fill"),
-                ("Coffee",         "coffee", 250, 95,  0,    "cup.and.saucer.fill"),
-                ("Tea",            "tea",    250, 47,  0,    "leaf.fill"),
-                ("Beer (330 ml)",  "beer",   330, 0,   5.0,  "mug.fill"),
-                ("Beer (500 ml)",  "beer",   500, 0,   5.0,  "mug.fill"),
-                ("Wine",           "wine",   150, 0,   12.5, "wineglass.fill"),
-                ("Spirit (Shot)",  "spirit", 40,  0,   40.0, "wineglass"),
-                ("Juice",          "juice",  250, 0,   0,    "carrot.fill"),
-                ("Soda",           "other",  330, 40,  0,    "bubbles.and.sparkles"),
+                ("default-water-glass",  "Water (Glass)",  "water",  250, 0,   0,    "drop.fill"),
+                ("default-water-bottle", "Water (Bottle)", "water",  500, 0,   0,    "waterbottle.fill"),
+                ("default-espresso",     "Espresso",       "coffee", 30,  63,  0,    "cup.and.saucer.fill"),
+                ("default-coffee",       "Coffee",         "coffee", 250, 95,  0,    "cup.and.saucer.fill"),
+                ("default-tea",          "Tea",            "tea",    250, 47,  0,    "leaf.fill"),
+                ("default-beer-330",     "Beer (330 ml)",  "beer",   330, 0,   5.0,  "mug.fill"),
+                ("default-beer-500",     "Beer (500 ml)",  "beer",   500, 0,   5.0,  "mug.fill"),
+                ("default-wine",         "Wine",           "wine",   150, 0,   12.5, "wineglass.fill"),
+                ("default-spirit",       "Spirit (Shot)",  "spirit", 40,  0,   40.0, "wineglass"),
+                ("default-juice",        "Juice",          "juice",  250, 0,   0,    "carrot.fill"),
+                ("default-soda",         "Soda",           "other",  330, 40,  0,    "bubbles.and.sparkles"),
             ]
             for (i, t) in defaults.enumerated() {
                 try db.execute(
                     sql: """
-                        INSERT INTO drink_template
+                        INSERT OR IGNORE INTO drink_template
                         (id, name, category, defaultVolumeMl, caffeineContentMg, alcoholPercent, icon, sortOrder)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                    arguments: [UUID().uuidString, t.name, t.category, t.volumeMl,
+                    arguments: [t.id, t.name, t.category, t.volumeMl,
                                 t.caffeineMg, t.alcoholPct, t.icon, i])
             }
         }

@@ -348,6 +348,53 @@ class MeasurementStore: ObservableObject {
         }
     }
 
+    /// Aggregate daily metric summaries — one row per (day, type) with count/avg/min/max.
+    struct DailyMetricSummary {
+        let date: Date
+        let type: String
+        let count: Int
+        let avg: Double
+        let min: Double
+        let max: Double
+        let unit: String
+    }
+
+    func dailyMetricSummaries() -> [DailyMetricSummary] {
+        let sql = """
+            SELECT
+                CAST(dp.timestamp / 86400 AS INTEGER) * 86400 AS dayEpoch,
+                dp.type,
+                COUNT(*) AS cnt,
+                AVG(dp.value) AS avgVal,
+                MIN(dp.value) AS minVal,
+                MAX(dp.value) AS maxVal,
+                dp.unit
+            FROM data_point dp
+            JOIN measurement m ON dp.measurementId = m.id
+            WHERE m.type = 'metric'
+            GROUP BY dayEpoch, dp.type
+            ORDER BY dayEpoch DESC, dp.type
+            """
+        do {
+            return try db.dbQueue.read { db in
+                try Row.fetchAll(db, sql: sql).map { row in
+                    DailyMetricSummary(
+                        date: Date(timeIntervalSince1970: row["dayEpoch"]),
+                        type: row["type"],
+                        count: row["cnt"],
+                        avg: row["avgVal"],
+                        min: row["minVal"],
+                        max: row["maxVal"],
+                        unit: row["unit"]
+                    )
+                }
+            }
+        } catch {
+            AppLogger.storage.error("dailyMetricSummaries failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
     func queryDataPoints(sql: String, arguments: StatementArguments = StatementArguments()) -> [DataPoint] {
         do {
             return try db.dbQueue.read { db in

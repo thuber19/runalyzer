@@ -14,7 +14,7 @@ enum Keychain {
             kSecAttrService: service,
             kSecAttrAccount: key,
             kSecValueData: data,
-            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlock
+            kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
         SecItemDelete(query as CFDictionary)
         return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
@@ -46,7 +46,8 @@ enum Keychain {
         }
         var keyData = Data(count: 32)
         keyData.withUnsafeMutableBytes { buffer in
-            _ = SecRandomCopyBytes(kSecRandomDefault, 32, buffer.baseAddress!)
+            guard let ptr = buffer.baseAddress else { return }
+            _ = SecRandomCopyBytes(kSecRandomDefault, 32, ptr)
         }
         save(keyData, key: dbKeyAccount)
         return keyData

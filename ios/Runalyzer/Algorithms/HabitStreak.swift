@@ -70,8 +70,8 @@ enum HabitStreak {
 
         var longest = 0
         var current = 0
-        var cursor = sorted.first!
-        let last = sorted.last!
+        guard let first = sorted.first, let last = sorted.last else { return 0 }
+        var cursor = first
 
         while cursor <= last {
             if habit.isScheduled(on: cursor, calendar: calendar) {

@@ -112,49 +112,22 @@ struct MeasurementDetailView: View {
     // MARK: - Sleep Summary
 
     private func sleepSummaryView(_ sleepPoints: [DataPoint]) -> some View {
-        // Prefer Watch staged data (Core/REM/Deep) over generic iPhone data (Asleep/InBed)
-        // If Watch stages exist, only count Watch source data to avoid double-counting
-        let hasStages = sleepPoints.contains { ["Core", "Deep", "REM"].contains($0.unit) }
-        let filtered: [DataPoint]
-        if hasStages {
-            // Use only staged sources (Watch) + Awake from any source
-            let stagedSources = Set(sleepPoints.filter { ["Core", "Deep", "REM"].contains($0.unit) }
-                .map { $0.source })
-            filtered = sleepPoints.filter { stagedSources.contains($0.source) || $0.unit == "Awake" }
-        } else {
-            filtered = sleepPoints
-        }
-
-        let stages = filtered.compactMap { p -> (stage: String, minutes: Double)? in
-            guard let end = p.endTimestamp else { return nil }
-            return (stage: p.unit, minutes: end.timeIntervalSince(p.timestamp) / 60)
-        }
-
-        let stageNames = ["Deep", "Core", "REM", "Awake", "InBed", "Asleep"]
-        let stageMinutes: [(String, Double)] = stageNames.compactMap { name in
-            let mins = stages.filter { $0.stage == name }.reduce(0) { $0 + $1.minutes }
-            return mins > 0 ? (name, mins) : nil
-        }
-
-        let sleepMin = stages.filter { ["Deep", "Core", "REM", "Asleep"].contains($0.stage) }
-            .reduce(0) { $0 + $1.minutes }
-        let deepMin = stages.filter { $0.stage == "Deep" }.reduce(0) { $0 + $1.minutes }
-        let remMin = stages.filter { $0.stage == "REM" }.reduce(0) { $0 + $1.minutes }
+        let summary = SleepScore.stageSummary(from: sleepPoints)
 
         return VStack(alignment: .leading, spacing: 8) {
             Text("SLEEP").font(.caption2).foregroundColor(.gray)
 
             HStack(spacing: 20) {
                 VStack {
-                    Text(formatMinutes(sleepMin)).font(.title2.bold().monospacedDigit())
+                    Text(formatMinutes(summary.asleepMinutes)).font(.title2.bold().monospacedDigit())
                     Text("Asleep").font(.caption2).foregroundColor(.gray)
                 }
                 VStack {
-                    Text(formatMinutes(deepMin)).font(.title2.bold().monospacedDigit())
+                    Text(formatMinutes(summary.deepMinutes)).font(.title2.bold().monospacedDigit())
                     Text("Deep").font(.caption2).foregroundColor(.indigo)
                 }
                 VStack {
-                    Text(formatMinutes(remMin)).font(.title2.bold().monospacedDigit())
+                    Text(formatMinutes(summary.remMinutes)).font(.title2.bold().monospacedDigit())
                     Text("REM").font(.caption2).foregroundColor(.cyan)
                 }
             }
@@ -162,12 +135,12 @@ struct MeasurementDetailView: View {
             Divider().background(Color.gray.opacity(0.3))
             Text("TIME PER STAGE").font(.caption2).foregroundColor(.gray)
 
-            ForEach(stageMinutes, id: \.0) { (name, mins) in
+            ForEach(summary.stageBreakdown, id: \.name) { item in
                 HStack {
-                    Circle().fill(sleepStageColor(name)).frame(width: 10, height: 10)
-                    Text(name).font(.caption)
+                    Circle().fill(sleepStageColor(item.name)).frame(width: 10, height: 10)
+                    Text(item.name).font(.caption)
                     Spacer()
-                    Text(formatMinutes(mins)).font(.caption.monospacedDigit())
+                    Text(formatMinutes(item.minutes)).font(.caption.monospacedDigit())
                 }
             }
         }
@@ -280,61 +253,34 @@ struct MeasurementDetailView: View {
     private func hrZoneBreakdown(_ hrSamples: [DataPoint]) -> some View {
         let profile = profileProvider.profile
         let profileZones = profile.hrZones
+        let lowerBounds = profile.hrZoneLowerBounds
         let colors: [Color] = [.gray, .blue, .green, .orange, .red]
 
-        // Build ranges from zone boundaries (Zone 1 starts at 50% of max HR)
-        let lowerBounds = profile.hrZoneLowerBounds
-        var ranges: [(String, ClosedRange<Double>, Color)] = []
-        for (i, zone) in profileZones.enumerated() {
-            let lower = Double(lowerBounds[i])
-            let upper = Double(zone.maxBPM)
-            ranges.append((zone.name, lower...upper, colors[min(i, colors.count - 1)]))
+        let zoneDefs = profileZones.enumerated().map { i, zone in
+            HRZoneAnalysis.ZoneDefinition(
+                name: zone.name,
+                range: Double(lowerBounds[i])...Double(zone.maxBPM)
+            )
         }
 
-        // Calculate time per zone using actual intervals between consecutive samples
-        let sortedHR = hrSamples.sorted { $0.timestamp < $1.timestamp }
-        var zoneSeconds: [Int: Double] = [:]  // zone index → seconds
-
-        for i in 0..<sortedHR.count {
-            let hr = sortedHR[i].value
-            // Each sample represents time until the next sample (or avg interval for the last)
-            let interval: Double
-            if i < sortedHR.count - 1 {
-                interval = sortedHR[i + 1].timestamp.timeIntervalSince(sortedHR[i].timestamp)
-            } else if sortedHR.count > 1 {
-                // Last sample: use average interval
-                let total = sortedHR.last!.timestamp.timeIntervalSince(sortedHR.first!.timestamp)
-                interval = total / Double(sortedHR.count - 1)
-            } else {
-                interval = 0
-            }
-            // Find which zone this HR falls into
-            for (j, (_, range, _)) in ranges.enumerated() {
-                if range.contains(hr) {
-                    zoneSeconds[j, default: 0] += interval
-                    break
-                }
-            }
-        }
-
-        let totalDurationSec = zoneSeconds.values.reduce(0, +)
-        let zoneTimes: [(String, Double, Color)] = ranges.enumerated().map { (i, zone) in
-            (zone.0, zoneSeconds[i] ?? 0, zone.2)
-        }
+        let zoneTimes = HRZoneAnalysis.compute(
+            hrValues: hrSamples.map { (value: $0.value, timestamp: $0.timestamp) },
+            zones: zoneDefs
+        )
 
         return VStack(alignment: .leading, spacing: 4) {
             Text("HR ZONES").font(.caption2).foregroundColor(.gray)
-            ForEach(zoneTimes, id: \.0) { (name, seconds, color) in
-                let pct = totalDurationSec > 0 ? seconds / totalDurationSec : 0
+            ForEach(Array(zoneTimes.enumerated()), id: \.offset) { i, zt in
+                let color = colors[min(i, colors.count - 1)]
                 HStack(spacing: 8) {
-                    Text(name).font(.caption).frame(width: 50, alignment: .leading)
+                    Text(zt.name).font(.caption).frame(width: 50, alignment: .leading)
                     GeometryReader { geo in
                         RoundedRectangle(cornerRadius: 3)
                             .fill(color)
-                            .frame(width: geo.size.width * pct)
+                            .frame(width: geo.size.width * zt.fraction)
                     }
                     .frame(height: 14)
-                    Text(formatDuration(seconds))
+                    Text(formatDuration(zt.seconds))
                         .font(.caption2.monospacedDigit()).foregroundColor(.gray)
                         .frame(width: 45, alignment: .trailing)
                 }

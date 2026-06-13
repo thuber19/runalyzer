@@ -1,5 +1,4 @@
 import SwiftUI
-import GRDB
 
 /// Database browser view — shows all data grouped by day.
 /// Each row is a data type for that day (HR, HRV, Steps, Sleep, etc.)
@@ -392,45 +391,13 @@ struct DataTab: View {
 
     // MARK: - Metric Row Builder
 
-    /// Query the DB for distinct (day, type, count) — only from .metric measurements.
-    /// Body comp and derived DataPoints have their own dedicated row types.
+    /// Build metric rows from daily aggregates via MetricIndex.
     private func buildMetricRows() -> [DataRow] {
-        let sql = """
-            SELECT
-                CAST(dp.timestamp / 86400 AS INTEGER) * 86400 AS dayEpoch,
-                dp.type,
-                COUNT(*) AS cnt,
-                AVG(dp.value) AS avgVal,
-                MIN(dp.value) AS minVal,
-                MAX(dp.value) AS maxVal,
-                dp.unit
-            FROM data_point dp
-            JOIN measurement m ON dp.measurementId = m.id
-            WHERE m.type = 'metric'
-            GROUP BY dayEpoch, dp.type
-            ORDER BY dayEpoch DESC, dp.type
-            """
-
-        do {
-            return try AppDatabase.shared.dbQueue.read { db in
-                let rows = try Row.fetchAll(db, sql: sql)
-                return rows.map { row in
-                    let dayEpoch: Double = row["dayEpoch"]
-                    let type: String = row["type"]
-                    let count: Int = row["cnt"]
-                    let avg: Double = row["avgVal"]
-                    let min: Double = row["minVal"]
-                    let max: Double = row["maxVal"]
-                    let unit: String = row["unit"]
-                    let date = Date(timeIntervalSince1970: dayEpoch)
-
-                    let summary = formatMetricSummary(type: type, count: count,
-                                                      avg: avg, min: min, max: max, unit: unit)
-                    return DataRow.metric(date: date, type: type, count: count, summary: summary)
-                }
-            }
-        } catch {
-            return []
+        let metricIndex = MetricIndex(store: measurementStore)
+        return metricIndex.dailyMetricSummaries().map { s in
+            let summary = formatMetricSummary(type: s.type, count: s.count,
+                                              avg: s.avg, min: s.min, max: s.max, unit: s.unit)
+            return DataRow.metric(date: s.date, type: s.type, count: s.count, summary: summary)
         }
     }
 
