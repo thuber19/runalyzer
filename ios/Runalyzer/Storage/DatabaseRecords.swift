@@ -255,6 +255,51 @@ struct UserProfileRecord: Codable, FetchableRecord, PersistableRecord {
     }
 }
 
+// MARK: - Drink Template Record
+
+struct DrinkTemplateRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "drink_template"
+
+    var id: String
+    var name: String
+    var category: String
+    var defaultVolumeMl: Int
+    var caffeineContentMg: Int
+    var alcoholPercent: Double
+    var icon: String
+    var isFavorite: Int
+    var isCustom: Int
+    var sortOrder: Int
+
+    init(from model: DrinkTemplate) {
+        self.id = model.id.uuidString
+        self.name = model.name
+        self.category = model.category.rawValue
+        self.defaultVolumeMl = model.defaultVolumeMl
+        self.caffeineContentMg = model.caffeineContentMg
+        self.alcoholPercent = model.alcoholPercent
+        self.icon = model.icon
+        self.isFavorite = model.isFavorite ? 1 : 0
+        self.isCustom = model.isCustom ? 1 : 0
+        self.sortOrder = model.sortOrder
+    }
+
+    func toModel() -> DrinkTemplate {
+        DrinkTemplate(
+            id: UUID(uuidString: id) ?? UUID(),
+            name: name,
+            category: DrinkCategory(rawValue: category) ?? .other,
+            defaultVolumeMl: defaultVolumeMl,
+            caffeineContentMg: caffeineContentMg,
+            alcoholPercent: alcoholPercent,
+            icon: icon,
+            isFavorite: isFavorite != 0,
+            isCustom: isCustom != 0,
+            sortOrder: sortOrder
+        )
+    }
+}
+
 // MARK: - Habit Record
 
 struct HabitRecord: Codable, FetchableRecord, PersistableRecord {

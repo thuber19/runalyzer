@@ -37,6 +37,7 @@ class MeasurementStore: ObservableObject {
                 sourcesByMeasurement[src.measurementId, default: []].append(src.toModel())
             }
 
+            // Batch-load primary data points for types that need them for list display
             // Batch-load primary data points for derived measurements (scores for list display)
             let derivedIDs = records.filter { $0.type == MeasurementType.derived.rawValue }.map(\.id)
             var primaryDPsByMeasurement: [String: [DataPoint]] = [:]
@@ -45,6 +46,22 @@ class MeasurementStore: ObservableObject {
                 let sql = "SELECT * FROM data_point WHERE measurementId IN (\(placeholders)) AND role = 'primary'"
                 let rows = try DataPointRecord.fetchAll(db, sql: sql,
                     arguments: StatementArguments(derivedIDs))
+                for row in rows {
+                    primaryDPsByMeasurement[row.measurementId, default: []].append(row.toModel())
+                }
+            }
+
+            // Batch-load all data points for fluid intake and check-in (2-4 DPs each)
+            let lightweightTypes: Set<String> = [
+                MeasurementType.fluidIntake.rawValue,
+                MeasurementType.checkIn.rawValue
+            ]
+            let lightweightIDs = records.filter { lightweightTypes.contains($0.type) }.map(\.id)
+            if !lightweightIDs.isEmpty {
+                let placeholders = lightweightIDs.map { _ in "?" }.joined(separator: ",")
+                let sql = "SELECT * FROM data_point WHERE measurementId IN (\(placeholders))"
+                let rows = try DataPointRecord.fetchAll(db, sql: sql,
+                    arguments: StatementArguments(lightweightIDs))
                 for row in rows {
                     primaryDPsByMeasurement[row.measurementId, default: []].append(row.toModel())
                 }

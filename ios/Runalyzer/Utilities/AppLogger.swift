@@ -8,4 +8,5 @@ enum AppLogger {
     static let health   = Logger(subsystem: "com.runalyzer.app", category: "Health")
     static let imu      = Logger(subsystem: "com.runalyzer.app", category: "IMU")
     static let scale    = Logger(subsystem: "com.runalyzer.app", category: "Scale")
+    static let checkin  = Logger(subsystem: "com.runalyzer.app", category: "CheckIn")
 }

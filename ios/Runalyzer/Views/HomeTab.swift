@@ -7,25 +7,34 @@ struct HomeTab: View {
     @EnvironmentObject var sourcePrefs: SourcePreferenceStore
     @EnvironmentObject var workoutStore: WorkoutStore
     @EnvironmentObject var habitStore: HabitStore
+    @EnvironmentObject var fluidIntakeProvider: FluidIntakeProvider
+    @EnvironmentObject var checkInProvider: CheckInProvider
 
     private var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
     private let cal = Calendar.current
 
     @State private var showLabEntry = false
+    @State private var showDrinkLog = false
+    @State private var showEveningCheckIn = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
+                    // Evening check-in banner (shows after 6 PM if not done)
+                    if isEveningAndCheckInPending {
+                        eveningCheckInBanner
+                    }
+
                     recoveryTile
 
                     HStack(spacing: 12) { heartTile; sleepTile }
 
                     HStack(spacing: 12) { activityTile; habitsTile }
 
-                    HStack(spacing: 12) { bodyCompTile; workoutsTile }
+                    HStack(spacing: 12) { hydrationTile; bodyCompTile }
 
-                    labResultsTile
+                    HStack(spacing: 12) { workoutsTile; labResultsTile }
                 }
                 .padding()
             }
@@ -33,13 +42,24 @@ struct HomeTab: View {
             .navigationTitle("Home")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showLabEntry = true } label: {
-                        Image(systemName: "cross.case")
+                    HStack(spacing: 12) {
+                        Button { showDrinkLog = true } label: {
+                            Image(systemName: "drop.fill")
+                        }
+                        Button { showLabEntry = true } label: {
+                            Image(systemName: "cross.case")
+                        }
                     }
                 }
             }
             .sheet(isPresented: $showLabEntry) {
                 LabResultsEntrySheet()
+            }
+            .sheet(isPresented: $showDrinkLog) {
+                DrinkLogSheet()
+            }
+            .sheet(isPresented: $showEveningCheckIn) {
+                EveningCheckInSheet()
             }
         }
     }
@@ -356,6 +376,64 @@ struct HomeTab: View {
         if days < 30 { return "\(days)d ago" }
         let months = days / 30
         return months == 1 ? "1 month ago" : "\(months) months ago"
+    }
+
+    // MARK: - Hydration
+
+    private var hydrationTile: some View {
+        let total = fluidIntakeProvider.todayTotalMl
+        let storedGoal = UserDefaults.standard.integer(forKey: "hydration_goal_ml")
+        let goal = Double(storedGoal > 0 ? storedGoal : 2500)
+        let progress = min(total / goal, 1.0)
+
+        return CustomTile {
+            FluidDashboardView()
+        } content: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("HYDRATION").font(.caption2).foregroundColor(.gray)
+                HStack(alignment: .firstTextBaseline, spacing: 2) {
+                    Text(String(format: "%.0f", total)).font(.title.bold().monospacedDigit())
+                        .foregroundColor(progress >= 1.0 ? .cyan : .white)
+                    Text("mL").font(.caption2).foregroundColor(.gray)
+                }
+                Text("\(fluidIntakeProvider.todayDrinks.count) drinks")
+                    .font(.caption2).foregroundColor(.gray)
+                Spacer()
+                Text("Today").font(.caption2).foregroundColor(.gray.opacity(0.6))
+            }
+        }
+    }
+
+    // MARK: - Evening Check-in Banner
+
+    private var isEveningAndCheckInPending: Bool {
+        let hour = cal.component(.hour, from: Date())
+        return hour >= 18 && !checkInProvider.eveningCheckInDoneToday
+    }
+
+    private var eveningCheckInBanner: some View {
+        Button {
+            showEveningCheckIn = true
+        } label: {
+            HStack {
+                Image(systemName: "moon.stars.fill")
+                    .foregroundStyle(.purple)
+                VStack(alignment: .leading) {
+                    Text("Evening Check-in")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                    Text("How was your energy today?")
+                        .font(.caption)
+                        .foregroundStyle(.gray)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.gray)
+            }
+            .padding()
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.purple.opacity(0.15)))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Helpers

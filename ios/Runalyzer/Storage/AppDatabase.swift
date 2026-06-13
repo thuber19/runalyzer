@@ -278,6 +278,47 @@ final class AppDatabase {
             try db.execute(sql: "UPDATE habit_log SET source = 'auto' WHERE autoFulfilled = 1")
         }
 
+        migrator.registerMigration("v5-fluid-checkin") { db in
+            try db.create(table: "drink_template") { t in
+                t.primaryKey("id", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("category", .text).notNull()
+                t.column("defaultVolumeMl", .integer).notNull()
+                t.column("caffeineContentMg", .integer).notNull().defaults(to: 0)
+                t.column("alcoholPercent", .double).notNull().defaults(to: 0)
+                t.column("icon", .text).notNull().defaults(to: "cup.and.saucer")
+                t.column("isFavorite", .integer).notNull().defaults(to: 0)
+                t.column("isCustom", .integer).notNull().defaults(to: 0)
+                t.column("sortOrder", .integer).notNull().defaults(to: 0)
+            }
+
+            // Seed default drink templates
+            let defaults: [(name: String, category: String, volumeMl: Int,
+                            caffeineMg: Int, alcoholPct: Double, icon: String)] = [
+                ("Water (Glass)",  "water",  250, 0,   0,    "drop.fill"),
+                ("Water (Bottle)", "water",  500, 0,   0,    "waterbottle.fill"),
+                ("Espresso",       "coffee", 30,  63,  0,    "cup.and.saucer.fill"),
+                ("Coffee",         "coffee", 250, 95,  0,    "cup.and.saucer.fill"),
+                ("Tea",            "tea",    250, 47,  0,    "leaf.fill"),
+                ("Beer (330 ml)",  "beer",   330, 0,   5.0,  "mug.fill"),
+                ("Beer (500 ml)",  "beer",   500, 0,   5.0,  "mug.fill"),
+                ("Wine",           "wine",   150, 0,   12.5, "wineglass.fill"),
+                ("Spirit (Shot)",  "spirit", 40,  0,   40.0, "wineglass"),
+                ("Juice",          "juice",  250, 0,   0,    "carrot.fill"),
+                ("Soda",           "other",  330, 40,  0,    "bubbles.and.sparkles"),
+            ]
+            for (i, t) in defaults.enumerated() {
+                try db.execute(
+                    sql: """
+                        INSERT INTO drink_template
+                        (id, name, category, defaultVolumeMl, caffeineContentMg, alcoholPercent, icon, sortOrder)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                    arguments: [UUID().uuidString, t.name, t.category, t.volumeMl,
+                                t.caffeineMg, t.alcoholPct, t.icon, i])
+            }
+        }
+
         return migrator
     }
 

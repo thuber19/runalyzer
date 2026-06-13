@@ -94,12 +94,14 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
     /// Display name for the measurement type (used in list rows when DataPoints aren't loaded).
     var typeName: String {
         switch type {
-        case .bodyComp:    return "Body Composition"
-        case .derived:     return "Derived"
-        case .metric:      return "Metric"
-        case .workout:     return "IMU Recording"
-        case .hkWorkout:   return "Workout"
-        case .labResults:  return "Lab Results"
+        case .bodyComp:     return "Body Composition"
+        case .derived:      return "Derived"
+        case .metric:       return "Metric"
+        case .workout:      return "IMU Recording"
+        case .hkWorkout:    return "Workout"
+        case .labResults:   return "Lab Results"
+        case .fluidIntake:  return "Drink"
+        case .checkIn:      return "Check-in"
         }
     }
 
@@ -200,6 +202,24 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
                 String(format: "%.0f %@ %@", p.value, p.unit, DataType.labDisplayName(p.type))
             }
             return parts.isEmpty ? "Lab Results" : parts.joined(separator: " · ")
+        case .fluidIntake:
+            let volume = dataPoints.first(where: { $0.type == DataType.fluidVolume })?.value ?? 0
+            let category = dataPoints.first(where: { $0.type == DataType.fluidCategory })?.unit ?? "drink"
+            return String(format: "%@ · %.0f mL", category.capitalized, volume)
+        case .checkIn:
+            if let readiness = dataPoints.first(where: { $0.type == DataType.morningReadiness }) {
+                let labels = ["", "Exhausted", "Tired", "OK", "Good", "Great"]
+                let label = Int(readiness.value) >= 1 && Int(readiness.value) <= 5
+                    ? labels[Int(readiness.value)] : "\(Int(readiness.value))"
+                return "Morning · \(label)"
+            }
+            if let energy = dataPoints.first(where: { $0.type == DataType.eveningEnergy }) {
+                let labels = ["", "Very Low", "Low", "OK", "Good", "Great"]
+                let label = Int(energy.value) >= 1 && Int(energy.value) <= 5
+                    ? labels[Int(energy.value)] : "\(Int(energy.value))"
+                return "Evening · \(label)"
+            }
+            return "Check-in"
         }
     }
 
@@ -211,12 +231,14 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
 
     var icon: String {
         switch type {
-        case .workout:    return "figure.run"
-        case .bodyComp:   return "scalemass"
-        case .derived:    return "function"
-        case .metric:     return "waveform.path.ecg"
-        case .hkWorkout:  return "heart.circle"
-        case .labResults: return "cross.case"
+        case .workout:     return "figure.run"
+        case .bodyComp:    return "scalemass"
+        case .derived:     return "function"
+        case .metric:      return "waveform.path.ecg"
+        case .hkWorkout:   return "heart.circle"
+        case .labResults:  return "cross.case"
+        case .fluidIntake: return "drop.fill"
+        case .checkIn:     return "face.smiling"
         }
     }
 
@@ -255,6 +277,8 @@ enum MeasurementType: String, Codable, Sendable {
     case metric = "metric"          // raw imported metrics (HRV, RHR, HR, etc.)
     case hkWorkout = "hk_workout"   // HealthKit workout (time-bounded event with embedded time-series)
     case labResults = "lab_results" // manual blood work / lab results entry
+    case fluidIntake = "fluid_intake" // drink/fluid log (water, coffee, alcohol, etc.)
+    case checkIn = "check_in"       // subjective self-assessment (morning readiness, evening energy)
 }
 
 // MARK: - Source string convention helpers
@@ -279,6 +303,11 @@ extension MeasurementSource {
                           serialNumber: DataSource.healthKit(workoutID),
                           algorithmName: nil)
     }
+
+    /// Source for manual user entries (check-ins, drink logging).
+    static let manualEntry = MeasurementSource(
+        deviceType: "manual", deviceName: "Manual Entry",
+        serialNumber: nil, algorithmName: nil)
 
     /// Source backed by HealthKit aggregate data (no specific object UUID).
     /// Derives deviceType from the HK source name (e.g. "Apple Watch" → "apple_watch").
@@ -397,6 +426,17 @@ enum DataType {
         default:               return type.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
+
+    // Fluid intake
+    static let fluidVolume      = "fluid_volume"          // mL
+    static let fluidCategory    = "fluid_category"        // value=0, unit stores category name (water, coffee, beer, etc.)
+    static let caffeineContent  = "caffeine_content"      // mg (estimated from template)
+    static let alcoholUnits     = "alcohol_units"         // standard drinks
+
+    // Subjective check-in
+    static let morningReadiness = "morning_readiness"     // 1–5 scale (how rested)
+    static let eveningEnergy    = "evening_energy"        // 1–5 scale (how was energy)
+    static let checkInTag       = "check_in_tag"          // value=1.0, unit stores tag name
 
     // Recovery score (recovery_v1) — overnight HRV + RHR, z-score normalized
     static let recoveryIndex        = "recovery_index"          // 0–100 (higher = better recovered)

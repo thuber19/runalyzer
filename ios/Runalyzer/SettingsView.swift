@@ -43,6 +43,14 @@ struct SettingsView: View {
                     .listRowBackground(Color(hex: 0x16213e))
                 }
 
+                // Check-in Reminders
+                Section("Check-in Reminders") {
+                    NavigationLink(destination: CheckInSettingsView()) {
+                        Label("Morning & Evening", systemImage: "bell.badge")
+                    }
+                    .listRowBackground(Color(hex: 0x16213e))
+                }
+
                 // Data
                 Section("Data") {
                     NavigationLink(destination: SourcePreferencesView()) {

@@ -12,6 +12,8 @@ private enum DataFilter: String, CaseIterable {
     case recovery   = "Recovery"
     case sleep      = "Sleep"
     case labs       = "Labs"
+    case fluid      = "Fluid"
+    case checkIns   = "Check-ins"
 }
 
 struct DataTab: View {
@@ -29,6 +31,8 @@ struct DataTab: View {
         case bodyComp(SensorMeasurement)
         case derived(SensorMeasurement)
         case labResults(SensorMeasurement)
+        case fluidIntake(SensorMeasurement)
+        case checkIn(SensorMeasurement)
 
         var id: String {
             switch self {
@@ -38,6 +42,8 @@ struct DataTab: View {
             case .bodyComp(let m): return "bc-\(m.id.uuidString)"
             case .derived(let m): return "d-\(m.id.uuidString)"
             case .labResults(let m): return "lr-\(m.id.uuidString)"
+            case .fluidIntake(let m): return "fl-\(m.id.uuidString)"
+            case .checkIn(let m): return "ci-\(m.id.uuidString)"
             }
         }
 
@@ -48,6 +54,8 @@ struct DataTab: View {
             case .bodyComp(let m): return m.date
             case .derived(let m): return m.date
             case .labResults(let m): return m.date
+            case .fluidIntake(let m): return m.date
+            case .checkIn(let m): return m.date
             }
         }
     }
@@ -91,6 +99,20 @@ struct DataTab: View {
             for m in measurementStore.measurements(ofType: .labResults) {
                 let day = cal.startOfDay(for: m.date)
                 rowsByDay[day, default: []].append(.labResults(m))
+            }
+        }
+
+        if filter == .all || filter == .fluid {
+            for m in measurementStore.measurements(ofType: .fluidIntake) {
+                let day = cal.startOfDay(for: m.date)
+                rowsByDay[day, default: []].append(.fluidIntake(m))
+            }
+        }
+
+        if filter == .all || filter == .checkIns {
+            for m in measurementStore.measurements(ofType: .checkIn) {
+                let day = cal.startOfDay(for: m.date)
+                rowsByDay[day, default: []].append(.checkIn(m))
             }
         }
 
@@ -176,7 +198,8 @@ struct DataTab: View {
         switch row {
         case .workout(let w):
             workoutStore.delete(w.id)
-        case .bodyComp(let m), .derived(let m), .labResults(let m):
+        case .bodyComp(let m), .derived(let m), .labResults(let m),
+             .fluidIntake(let m), .checkIn(let m):
             measurementStore.delete(m.id)
         case .metric(_, _, _, _):
             break  // Metric rows are aggregates — delete via Delete All
@@ -212,6 +235,12 @@ struct DataTab: View {
             if !ids.isEmpty { measurementStore.deleteBatch(ids) }
         case .labs:
             let ids = Set(measurementStore.measurements(ofType: .labResults).map(\.id))
+            if !ids.isEmpty { measurementStore.deleteBatch(ids) }
+        case .fluid:
+            let ids = Set(measurementStore.measurements(ofType: .fluidIntake).map(\.id))
+            if !ids.isEmpty { measurementStore.deleteBatch(ids) }
+        case .checkIns:
+            let ids = Set(measurementStore.measurements(ofType: .checkIn).map(\.id))
             if !ids.isEmpty { measurementStore.deleteBatch(ids) }
         }
     }
@@ -288,6 +317,34 @@ struct DataTab: View {
                         Text(m.summary).font(.caption).foregroundColor(.gray)
                     }
                 }
+            }
+
+        case .fluidIntake(let m):
+            HStack(spacing: 12) {
+                Image(systemName: "drop.fill")
+                    .foregroundColor(.cyan)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Drink").font(.subheadline)
+                    Text(m.summary).font(.caption).foregroundColor(.gray)
+                }
+                Spacer()
+                Text(m.date.formatted(date: .omitted, time: .shortened))
+                    .font(.caption2).foregroundColor(.gray)
+            }
+
+        case .checkIn(let m):
+            HStack(spacing: 12) {
+                Image(systemName: "face.smiling")
+                    .foregroundColor(.purple)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Check-in").font(.subheadline)
+                    Text(m.summary).font(.caption).foregroundColor(.gray)
+                }
+                Spacer()
+                Text(m.date.formatted(date: .omitted, time: .shortened))
+                    .font(.caption2).foregroundColor(.gray)
             }
         }
     }
@@ -533,11 +590,13 @@ struct DataTab: View {
 fileprivate extension DataTab.DataRow {
     var sortOrder: Int {
         switch self {
-        case .workout:    return 0
-        case .metric:     return 1
-        case .bodyComp:   return 2
-        case .derived:    return 3
-        case .labResults: return 4
+        case .workout:     return 0
+        case .metric:      return 1
+        case .bodyComp:    return 2
+        case .derived:     return 3
+        case .labResults:  return 4
+        case .fluidIntake: return 5
+        case .checkIn:     return 6
         }
     }
 }

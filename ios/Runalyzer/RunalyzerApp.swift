@@ -15,6 +15,9 @@ struct RunalyzerApp: App {
     @StateObject private var sourcePrefs = SourcePreferenceStore()
     @StateObject private var profileProvider: UserProfileProvider
     @StateObject private var habitStore: HabitStore
+    @StateObject private var drinkTemplateStore: DrinkTemplateStore
+    @StateObject private var fluidIntakeProvider: FluidIntakeProvider
+    @StateObject private var checkInProvider: CheckInProvider
 
     @State private var databaseFailed = false
 
@@ -28,10 +31,14 @@ struct RunalyzerApp: App {
             AppDatabase.shared = (try? AppDatabase.inMemory()) ?? AppDatabase.shared
             _databaseFailed = State(initialValue: true)
         }
-        _store = StateObject(wrappedValue: MeasurementStore())
+        let measurementStore = MeasurementStore()
+        _store = StateObject(wrappedValue: measurementStore)
         _workoutStore = StateObject(wrappedValue: WorkoutStore())
         _profileProvider = StateObject(wrappedValue: UserProfileProvider())
         _habitStore = StateObject(wrappedValue: HabitStore())
+        _drinkTemplateStore = StateObject(wrappedValue: DrinkTemplateStore())
+        _fluidIntakeProvider = StateObject(wrappedValue: FluidIntakeProvider(measurementStore: measurementStore))
+        _checkInProvider = StateObject(wrappedValue: CheckInProvider(measurementStore: measurementStore))
     }
 
     var body: some Scene {
@@ -46,6 +53,9 @@ struct RunalyzerApp: App {
                 .environmentObject(workoutStore)
                 .environmentObject(profileProvider)
                 .environmentObject(habitStore)
+                .environmentObject(drinkTemplateStore)
+                .environmentObject(fluidIntakeProvider)
+                .environmentObject(checkInProvider)
                 .onAppear {
                     healthKit.requestAuthorization()
                     profileProvider.autoFillFromHealthKit()
@@ -53,6 +63,7 @@ struct RunalyzerApp: App {
                                    store: store, workoutStore: workoutStore,
                                    healthKit: healthKit, profileProvider: profileProvider,
                                    habitStore: habitStore)
+                    checkInProvider.scheduleNotifications()
                 }
                 .alert("Database Error", isPresented: $databaseFailed) {
                     Button("OK", role: .cancel) {}

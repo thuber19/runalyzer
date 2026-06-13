@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var coordinator: DeviceCoordinator
     @EnvironmentObject var appWiring: AppWiring
     @EnvironmentObject var measurementStore: MeasurementStore
+    @EnvironmentObject var checkInProvider: CheckInProvider
     @State private var selectedTab = 0
     @State private var showMeasuring = false
     @State private var measureComplete = false
@@ -13,48 +14,53 @@ struct ContentView: View {
     private var scale: QNScaleDriver? { coordinator.scaleDriver }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            HomeTab()
-                .tabItem { Label("Home", systemImage: "house") }
-                .tag(0)
+        Group {
+            if !checkInProvider.morningCheckInDoneToday {
+                MorningCheckInView()
+            } else {
+                TabView(selection: $selectedTab) {
+                    HomeTab()
+                        .tabItem { Label("Home", systemImage: "house") }
+                        .tag(0)
 
-            RunalyzerTab()
-                .tabItem { Label("Runalyzer", systemImage: "waveform.path.ecg") }
-                .tag(1)
+                    RunalyzerTab()
+                        .tabItem { Label("Runalyzer", systemImage: "waveform.path.ecg") }
+                        .tag(1)
 
-            DataTab()
-                .tabItem { Label("Data", systemImage: "cylinder.split.1x2") }
-                .tag(2)
+                    DataTab()
+                        .tabItem { Label("Data", systemImage: "cylinder.split.1x2") }
+                        .tag(2)
 
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape") }
-                .tag(3)
-        }
-        .preferredColorScheme(.dark)
-        .overlay { if showMeasuring { scaleMeasurementOverlay } }
-        .onChange(of: scale?.scaleState) { _, newState in
-            // Ignore state changes while showing the completion checkmark
-            guard !measureComplete else { return }
-
-            switch newState {
-            case .measuring, .stable:
-                if !showMeasuring {
-                    withAnimation { showMeasuring = true }
+                    SettingsView()
+                        .tabItem { Label("Settings", systemImage: "gearshape") }
+                        .tag(3)
                 }
-            case .complete:
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                withAnimation { measureComplete = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                    withAnimation { showMeasuring = false }
-                    measureComplete = false
-                    selectedTab = 2
+                .overlay { if showMeasuring { scaleMeasurementOverlay } }
+                .onChange(of: scale?.scaleState) { _, newState in
+                    guard !measureComplete else { return }
+
+                    switch newState {
+                    case .measuring, .stable:
+                        if !showMeasuring {
+                            withAnimation { showMeasuring = true }
+                        }
+                    case .complete:
+                        UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        withAnimation { measureComplete = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                            withAnimation { showMeasuring = false }
+                            measureComplete = false
+                            selectedTab = 2
+                        }
+                    case .idle, nil:
+                        withAnimation { showMeasuring = false }
+                    default:
+                        break
+                    }
                 }
-            case .idle, nil:
-                withAnimation { showMeasuring = false }
-            default:
-                break
             }
         }
+        .preferredColorScheme(.dark)
     }
 
     // MARK: - Scale Measurement Overlay
