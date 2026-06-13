@@ -89,7 +89,18 @@ enum RecoveryScore {
 
         let rhrPoints = metricIndex.query(type: DataType.restingHeartRate, measurementType: .metric,
                                           from: windowStart, to: dayStart)
-        let rhrValues = rhrPoints.map(\.value)
+        // Filter to overnight hours (00:00–06:00) for consistency with HRV
+        var rhrByDay: [Date: Double] = [:]
+        for p in rhrPoints {
+            let hour = cal.component(.hour, from: p.timestamp)
+            guard hour < 6 else { continue }
+            let day = cal.startOfDay(for: p.timestamp)
+            let existing = rhrByDay[day]
+            if existing == nil || p.value < existing! {
+                rhrByDay[day] = p.value
+            }
+        }
+        let rhrValues = Array(rhrByDay.values)
 
         return BaselineStats(
             meanSDNN: sdnnMeans.isEmpty ? 0 : sdnnMeans.reduce(0, +) / Double(sdnnMeans.count),

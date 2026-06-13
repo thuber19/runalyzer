@@ -37,8 +37,24 @@ class MeasurementStore: ObservableObject {
                 sourcesByMeasurement[src.measurementId, default: []].append(src.toModel())
             }
 
+            // Batch-load primary data points for derived measurements (scores for list display)
+            let derivedIDs = records.filter { $0.type == MeasurementType.derived.rawValue }.map(\.id)
+            var primaryDPsByMeasurement: [String: [DataPoint]] = [:]
+            if !derivedIDs.isEmpty {
+                let placeholders = derivedIDs.map { _ in "?" }.joined(separator: ",")
+                let sql = "SELECT * FROM data_point WHERE measurementId IN (\(placeholders)) AND role = 'primary'"
+                let rows = try DataPointRecord.fetchAll(db, sql: sql,
+                    arguments: StatementArguments(derivedIDs))
+                for row in rows {
+                    primaryDPsByMeasurement[row.measurementId, default: []].append(row.toModel())
+                }
+            }
+
             return records.map { record in
-                record.toModel(sources: sourcesByMeasurement[record.id] ?? [])
+                record.toModel(
+                    sources: sourcesByMeasurement[record.id] ?? [],
+                    dataPoints: primaryDPsByMeasurement[record.id] ?? []
+                )
             }
         }
 

@@ -9,6 +9,9 @@ struct MetricDefinition: Identifiable {
     let aggregation: Aggregation
     let direction: MetricTrend.MetricDirection
     let weight: Double
+    /// Optional hour-of-day filter. Only data points whose hour falls in this range are used.
+    /// Example: `0...5` keeps only overnight readings (00:00–05:59), matching WHOOP/Oura methodology.
+    let hourFilter: ClosedRange<Int>?
 
     enum Aggregation {
         case latest       // show most recent value (RHR, SpO2)
@@ -19,10 +22,12 @@ struct MetricDefinition: Identifiable {
     init(id: String, title: String, unit: String, color: Color,
          aggregation: Aggregation,
          direction: MetricTrend.MetricDirection = .higherIsBetter,
-         weight: Double = 1.0) {
+         weight: Double = 1.0,
+         hourFilter: ClosedRange<Int>? = nil) {
         self.id = id; self.title = title; self.unit = unit
         self.color = color; self.aggregation = aggregation
         self.direction = direction; self.weight = weight
+        self.hourFilter = hourFilter
     }
 }
 
@@ -92,14 +97,14 @@ struct CategoryDashboardView: View {
             // 7-day average for comparison badge
             let weekPoints = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                                from: weekAgo, to: today, filter: sourcePrefs)
-            let weekDaily = toDailyValues(weekPoints, metric: metric)
+            let weekDaily = CategoryDashboardView.toDailyValues(weekPoints, metric: metric)
             let weekAvg = weekDaily.isEmpty ? nil :
                 weekDaily.map(\.value).reduce(0, +) / Double(weekDaily.count)
 
             // 30-day sparkline
             let monthPoints = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                                 from: monthAgo, to: Date(), filter: sourcePrefs)
-            let monthDaily = toDailyValues(monthPoints, metric: metric)
+            let monthDaily = CategoryDashboardView.toDailyValues(monthPoints, metric: metric)
             let sparkline = monthDaily.map(\.value)
 
             let badge: DashboardTile<MetricTrendView>.Badge? = {
@@ -124,7 +129,10 @@ struct CategoryDashboardView: View {
                 sparklineColor: metric.color
             ) {
                 MetricTrendView(metricType: metric.id, title: metric.title,
-                                unit: metric.unit, color: metric.color)
+                                unit: metric.unit, color: metric.color,
+                                aggregation: metric.aggregation, direction: metric.direction,
+                                queryMeasurementType: queryMeasurementType,
+                                hourFilter: metric.hourFilter)
             }
         }
     }
@@ -182,7 +190,7 @@ struct CategoryDashboardView: View {
         return ForEach(metrics) { metric in
             let points = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
                                            from: lookback, to: Date(), filter: sourcePrefs)
-            let daily = toDailyValues(points, metric: metric)
+            let daily = CategoryDashboardView.toDailyValues(points, metric: metric)
             let sparkline = daily.map(\.value)
             let avg = daily.isEmpty ? nil :
                 daily.map(\.value).reduce(0, +) / Double(daily.count)
@@ -209,7 +217,10 @@ struct CategoryDashboardView: View {
                 sparklineColor: metric.color
             ) {
                 MetricTrendView(metricType: metric.id, title: metric.title,
-                                unit: metric.unit, color: metric.color)
+                                unit: metric.unit, color: metric.color,
+                                aggregation: metric.aggregation, direction: metric.direction,
+                                queryMeasurementType: queryMeasurementType,
+                                hourFilter: metric.hourFilter)
             }
         }
     }
@@ -228,13 +239,31 @@ struct CategoryDashboardView: View {
     // MARK: - Trend Computation
 
     private func computeTrend() -> CategoryTrend {
-        let historyStart = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) ?? Date()
+        CategoryDashboardView.computeTrend(
+            metrics: metrics,
+            days: timeRange.days,
+            measurementType: queryMeasurementType,
+            metricIndex: metricIndex,
+            sourcePrefs: sourcePrefs
+        )
+    }
+
+    /// Compute a category trend from metric definitions — usable from any view.
+    static func computeTrend(
+        metrics: [MetricDefinition],
+        days: Int,
+        measurementType: MeasurementType = .metric,
+        metricIndex: MetricIndex,
+        sourcePrefs: SourcePreferenceStore
+    ) -> CategoryTrend {
+        let cal = Calendar.current
+        let historyStart = cal.date(byAdding: .day, value: -days, to: Date()) ?? Date()
 
         var inputs: [HealthScore.MetricInput] = []
         for metric in metrics {
-            let points = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
+            let points = metricIndex.query(type: metric.id, measurementType: measurementType,
                                            from: historyStart, to: Date(), filter: sourcePrefs)
-            let dailyValues = toDailyValues(points, metric: metric)
+            let dailyValues = CategoryDashboardView.toDailyValues(points, metric: metric)
             guard !dailyValues.isEmpty else { continue }
 
             inputs.append(HealthScore.MetricInput(
@@ -248,10 +277,17 @@ struct CategoryDashboardView: View {
     }
 
     /// Aggregate raw data points into one value per day.
-    private func toDailyValues(_ points: [DataPoint],
-                                metric: MetricDefinition) -> [(date: Date, value: Double)] {
+    /// Respects `metric.hourFilter` — when set, only data points whose hour of day
+    /// falls within the range are included (e.g. `0...5` for overnight/sleep readings).
+    static func toDailyValues(_ points: [DataPoint],
+                               metric: MetricDefinition) -> [(date: Date, value: Double)] {
+        let cal = Calendar.current
         var byDay: [Date: [Double]] = [:]
         for p in points {
+            if let range = metric.hourFilter {
+                let hour = cal.component(.hour, from: p.timestamp)
+                guard range.contains(hour) else { continue }
+            }
             let day = cal.startOfDay(for: p.timestamp)
             byDay[day, default: []].append(p.value)
         }
@@ -316,7 +352,7 @@ struct CategoryDashboardView: View {
             if timeRange.isDaily {
                 val = dailyValue(points, metric: metric) ?? 0
             } else {
-                let daily = toDailyValues(points, metric: metric)
+                let daily = CategoryDashboardView.toDailyValues(points, metric: metric)
                 val = daily.isEmpty ? 0 : daily.map(\.value).reduce(0, +) / Double(daily.count)
             }
             return val >= 1000 ? "km" : "m"
@@ -360,7 +396,8 @@ extension CategoryDashboardView {
                                  direction: .lowerIsBetter, weight: 0.25),
                 MetricDefinition(id: DataType.hrvSDNN, title: "HRV (SDNN)",
                                  unit: "ms", color: .purple, aggregation: .dailyAverage,
-                                 direction: .higherIsBetter, weight: 0.25),
+                                 direction: .higherIsBetter, weight: 0.25,
+                                 hourFilter: 0...5),
                 MetricDefinition(id: DataType.bloodOxygen, title: "Blood Oxygen",
                                  unit: "%", color: .blue, aggregation: .latest,
                                  direction: .higherIsBetter, weight: 0.10),

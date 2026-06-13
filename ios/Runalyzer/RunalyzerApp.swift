@@ -79,6 +79,7 @@ class AppWiring: ObservableObject {
     private(set) var habitProvider: HabitProvider?
 
     private var profileProvider: UserProfileProvider?
+    private var refreshDebounceItem: DispatchWorkItem?
 
     func setup(coordinator: DeviceCoordinator, metrics: RunMetrics,
                store: MeasurementStore, workoutStore: WorkoutStore,
@@ -165,12 +166,19 @@ class AppWiring: ObservableObject {
     }
 
     /// Import latest metrics from HealthKit, then compute any missing stress scores.
+    /// Debounced to avoid duplicate computations when multiple HealthKit observers
+    /// or foreground events fire in quick succession.
     func refreshMetricsAndRecovery() {
-        metricProvider?.importMissingMetrics { [weak self] in
-            self?.recoveryProvider?.computeMissingScores()
-            self?.sleepProvider?.computeMissingScores()
-            self?.habitProvider?.processAutoFulfillment()
+        refreshDebounceItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            self?.metricProvider?.importMissingMetrics { [weak self] in
+                self?.recoveryProvider?.computeMissingScores()
+                self?.sleepProvider?.computeMissingScores()
+                self?.habitProvider?.processAutoFulfillment()
+            }
         }
+        refreshDebounceItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: item)
     }
 
     // MARK: - Wiring factories

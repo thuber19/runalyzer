@@ -61,7 +61,7 @@ enum MetricAggregator {
     }
 
     /// Compute period stats + trend direction.
-    /// Trend = % change via OLS regression line endpoints.
+    /// Trend = % change via OLS regression on **daily averages** (matches category dashboard).
     static func periodStats(_ points: [DataPoint]) -> PeriodStats {
         let values = points.map(\.value)
         guard !values.isEmpty else {
@@ -69,7 +69,12 @@ enum MetricAggregator {
         }
 
         let avg = values.reduce(0, +) / Double(values.count)
-        let trend = values.count >= 2 ? HealthScore.regressionPercentChange(values) : 0
+
+        // Aggregate to daily averages before computing trend so the regression
+        // matches the category dashboard (one point per day, evenly weighted).
+        let daily = dailyAggregates(points)
+        let dailyAvgs = daily.map(\.avg)
+        let trend = dailyAvgs.count >= 2 ? HealthScore.regressionPercentChange(dailyAvgs) : 0
 
         return PeriodStats(
             avg: avg,

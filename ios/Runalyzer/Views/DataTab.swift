@@ -10,6 +10,7 @@ private enum DataFilter: String, CaseIterable {
     case bodyComp   = "Body Comp"
     case metrics    = "Metrics"
     case recovery   = "Recovery"
+    case sleep      = "Sleep"
     case labs       = "Labs"
 }
 
@@ -76,8 +77,11 @@ struct DataTab: View {
             }
         }
 
-        if filter == .all || filter == .recovery {
+        if filter == .all || filter == .recovery || filter == .sleep {
             for m in measurementStore.measurements(ofType: .derived) {
+                let isSleep = m.sources.contains { $0.algorithmName == SleepMeasurementProvider.algorithmID }
+                if filter == .recovery && isSleep { continue }
+                if filter == .sleep && !isSleep { continue }
                 let day = cal.startOfDay(for: m.date)
                 rowsByDay[day, default: []].append(.derived(m))
             }
@@ -197,7 +201,14 @@ struct DataTab: View {
             let ids = Set(measurementStore.measurements(ofType: .metric).map(\.id))
             if !ids.isEmpty { measurementStore.deleteBatch(ids) }
         case .recovery:
-            let ids = Set(measurementStore.measurements(ofType: .derived).map(\.id))
+            let ids = Set(measurementStore.measurements(ofType: .derived)
+                .filter { !$0.sources.contains { $0.algorithmName == SleepMeasurementProvider.algorithmID } }
+                .map(\.id))
+            if !ids.isEmpty { measurementStore.deleteBatch(ids) }
+        case .sleep:
+            let ids = Set(measurementStore.measurements(ofType: .derived)
+                .filter { $0.sources.contains { $0.algorithmName == SleepMeasurementProvider.algorithmID } }
+                .map(\.id))
             if !ids.isEmpty { measurementStore.deleteBatch(ids) }
         case .labs:
             let ids = Set(measurementStore.measurements(ofType: .labResults).map(\.id))
@@ -257,12 +268,11 @@ struct DataTab: View {
         case .derived(let m):
             NavigationLink(destination: MeasurementDetailView(measurement: m)) {
                 HStack(spacing: 12) {
-                    Image(systemName: "function")
-                        .foregroundColor(Color.appBlue)
+                    derivedIcon(for: m)
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Recovery").font(.subheadline)
-                        Text(m.sourceLabel).font(.caption2).foregroundColor(.cyan)
+                        Text(derivedTitle(for: m)).font(.subheadline)
+                        Text(derivedSubtitle(for: m)).font(.caption2).foregroundColor(.gray)
                     }
                 }
             }
@@ -280,6 +290,47 @@ struct DataTab: View {
                 }
             }
         }
+    }
+
+    // MARK: - Derived Row Helpers
+
+    private func isSleepScore(_ m: SensorMeasurement) -> Bool {
+        m.sources.contains { $0.algorithmName == SleepMeasurementProvider.algorithmID }
+    }
+
+    private func derivedIcon(for m: SensorMeasurement) -> some View {
+        if isSleepScore(m) {
+            return Image(systemName: "moon.zzz.fill")
+                .foregroundColor(.purple)
+        } else {
+            return Image(systemName: "heart.circle.fill")
+                .foregroundColor(.red)
+        }
+    }
+
+    private func derivedTitle(for m: SensorMeasurement) -> String {
+        isSleepScore(m) ? "Sleep Score" : "Recovery Score"
+    }
+
+    private func derivedSubtitle(for m: SensorMeasurement) -> String {
+        if isSleepScore(m) {
+            if let score = m.dataPoints.first(where: { $0.type == DataType.sleepScore }) {
+                return "\(Int(score.value.rounded()))/100"
+            }
+        } else {
+            if let score = m.dataPoints.first(where: { $0.type == DataType.recoveryIndex }) {
+                let level = Int(score.value.rounded())
+                let label: String
+                switch score.value {
+                case 75...: label = "Excellent"
+                case 50...: label = "Good"
+                case 25...: label = "Fair"
+                default:    label = "Poor"
+                }
+                return "\(level)/100 · \(label)"
+            }
+        }
+        return ""
     }
 
     // MARK: - Metric Row Builder

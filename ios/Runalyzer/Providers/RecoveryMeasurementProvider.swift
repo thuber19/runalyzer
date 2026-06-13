@@ -1,4 +1,5 @@
 import Foundation
+import GRDB
 import os
 
 /// Self-contained provider for daily recovery score measurements.
@@ -7,17 +8,19 @@ import os
 class RecoveryMeasurementProvider {
     private weak var measurementStore: MeasurementStore?
     private let metricIndex: MetricIndex
+    private let db: AppDatabase
 
-    init(metricIndex: MetricIndex, measurementStore: MeasurementStore) {
+    init(metricIndex: MetricIndex, measurementStore: MeasurementStore, db: AppDatabase? = nil) {
         self.metricIndex = metricIndex
         self.measurementStore = measurementStore
+        self.db = db ?? AppDatabase.shared
     }
 
     // MARK: - Public API
 
     func computeMissingScores() {
-        guard let store = measurementStore else { return }
-        let missingDays = findMissingDays(in: store, lookbackDays: 7)
+        guard measurementStore != nil else { return }
+        let missingDays = findMissingDays(lookbackDays: 7)
         guard !missingDays.isEmpty else {
             AppLogger.health.info("Recovery: all recent days already computed")
             return
@@ -26,8 +29,8 @@ class RecoveryMeasurementProvider {
     }
 
     func backfillHistory(days: Int = 90, completion: (() -> Void)? = nil) {
-        guard let store = measurementStore else { completion?(); return }
-        let missingDays = findMissingDays(in: store, lookbackDays: days)
+        guard measurementStore != nil else { completion?(); return }
+        let missingDays = findMissingDays(lookbackDays: days)
         guard !missingDays.isEmpty else {
             AppLogger.health.info("Recovery backfill: no missing days")
             completion?()
@@ -39,20 +42,25 @@ class RecoveryMeasurementProvider {
 
     // MARK: - Private
 
-    private func findMissingDays(in store: MeasurementStore, lookbackDays: Int) -> [Date] {
+    /// Query the database directly (not the in-memory array) to avoid race conditions
+    /// where multiple triggers find the same day "missing" before the first save propagates.
+    private func findMissingDays(lookbackDays: Int) -> [Date] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
-
-        let existingDates = Set(
-            store.measurements
-                .filter { m in m.type == .derived &&
-                    m.sources.contains { $0.algorithmName == RecoveryScore.algorithmID } }
-                .map { cal.startOfDay(for: $0.date) }
-        )
 
         guard let startFrom = cal.date(byAdding: .day, value: -lookbackDays, to: today) else {
             return []
         }
+
+        let existingDates: Set<Date> = (try? db.dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT DISTINCT m.date FROM measurement m
+                JOIN measurement_source ms ON ms.measurementId = m.id
+                WHERE m.type = 'derived' AND ms.algorithmName = ?
+                  AND m.date >= ?
+                """, arguments: [RecoveryScore.algorithmID, startFrom.timeIntervalSince1970])
+            return Set(rows.map { cal.startOfDay(for: Date(timeIntervalSince1970: $0["date"])) })
+        }) ?? []
 
         var missing: [Date] = []
         var cursor = startFrom
@@ -80,15 +88,18 @@ class RecoveryMeasurementProvider {
                 cal.component(.hour, from: $0.timestamp) < 6  // overnight only
             }
 
-            // RHR from .metric measurements
+            // Overnight RHR (00:00–06:00) from .metric measurements
             let rhrPoints = metricIndex.query(type: DataType.restingHeartRate, measurementType: .metric,
                                               from: dayStart, to: dayEnd)
-            let rhr = rhrPoints.min(by: { $0.value < $1.value })
+            let overnightRhr = rhrPoints.filter {
+                cal.component(.hour, from: $0.timestamp) < 6  // overnight only
+            }
+            let rhr = overnightRhr.min(by: { $0.value < $1.value })
 
             guard !overnightHrv.isEmpty || rhr != nil else { continue }
 
             let baseline = RecoveryScore.buildBaselineFromMetricIndex(metricIndex, before: dayStart)
-            guard baseline.dayCount >= RecoveryScore.baselineWindowDays else { continue }
+            guard baseline.dayCount >= RecoveryScore.minBaselineDays else { continue }
 
             let sdnnSamples = overnightHrv.map { (value: $0.value, sourceName: sourceNameFrom($0.source)) }
             let inputs = RecoveryScore.DayInputs(

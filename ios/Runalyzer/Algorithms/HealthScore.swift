@@ -141,50 +141,6 @@ enum HealthScore {
         )
     }
 
-    // MARK: - Convenience: Heart Trend
-
-    /// Compute heart health trend.
-    ///
-    /// Weights: HRV 0.30, RHR 0.30, VO₂ Max 0.25, SpO₂ 0.15
-    /// RHR is the primary HR-level metric. Sleeping HR and walking HR are
-    /// strongly correlated with RHR — including all three would triple-count
-    /// the same underlying signal.
-    static func heartTrend(
-        rhrDailyValues: [(date: Date, value: Double)] = [],
-        hrvDailyValues: [(date: Date, value: Double)] = [],
-        vo2DailyValues: [(date: Date, value: Double)] = [],
-        spo2DailyValues: [(date: Date, value: Double)] = []
-    ) -> CategoryTrend {
-        var inputs: [MetricInput] = []
-
-        if rhrDailyValues.count >= minDataPoints {
-            inputs.append(MetricInput(
-                id: DataType.restingHeartRate, name: "Resting HR",
-                direction: .lowerIsBetter, weight: 0.30,
-                dailyValues: rhrDailyValues))
-        }
-        if hrvDailyValues.count >= minDataPoints {
-            inputs.append(MetricInput(
-                id: DataType.hrvSDNN, name: "HRV",
-                direction: .higherIsBetter, weight: 0.30,
-                dailyValues: hrvDailyValues))
-        }
-        if vo2DailyValues.count >= minDataPoints {
-            inputs.append(MetricInput(
-                id: DataType.vo2Max, name: "VO₂ Max",
-                direction: .higherIsBetter, weight: 0.25,
-                dailyValues: vo2DailyValues))
-        }
-        if spo2DailyValues.count >= minDataPoints {
-            inputs.append(MetricInput(
-                id: DataType.bloodOxygen, name: "SpO₂",
-                direction: .higherIsBetter, weight: 0.15,
-                dailyValues: spo2DailyValues))
-        }
-
-        return compute(metrics: inputs)
-    }
-
     // MARK: - Convenience: Sleep Trend
 
     /// Compute sleep trend from nightly sleep scores and component metrics.
@@ -221,40 +177,6 @@ enum HealthScore {
                 id: "sleep_efficiency", name: "Efficiency",
                 direction: .higherIsBetter, weight: 0.15,
                 dailyValues: efficiencyValues))
-        }
-
-        return compute(metrics: inputs)
-    }
-
-    // MARK: - Convenience: Activity Trend
-
-    /// Compute activity trend from daily steps and workout metrics.
-    ///
-    /// Weights: Steps 0.40, Workout duration 0.35, Distance 0.25
-    static func activityTrend(
-        stepValues: [(date: Date, value: Double)] = [],
-        workoutMinValues: [(date: Date, value: Double)] = [],
-        distanceValues: [(date: Date, value: Double)] = []
-    ) -> CategoryTrend {
-        var inputs: [MetricInput] = []
-
-        if stepValues.count >= minDataPoints {
-            inputs.append(MetricInput(
-                id: DataType.steps, name: "Steps",
-                direction: .higherIsBetter, weight: 0.40,
-                dailyValues: stepValues))
-        }
-        if workoutMinValues.count >= minDataPoints {
-            inputs.append(MetricInput(
-                id: "workout_minutes", name: "Workout Time",
-                direction: .higherIsBetter, weight: 0.35,
-                dailyValues: workoutMinValues))
-        }
-        if distanceValues.count >= minDataPoints {
-            inputs.append(MetricInput(
-                id: DataType.distance, name: "Distance",
-                direction: .higherIsBetter, weight: 0.25,
-                dailyValues: distanceValues))
         }
 
         return compute(metrics: inputs)

@@ -8,6 +8,12 @@ struct MetricTrendView: View {
     let title: String
     let unit: String
     let color: Color
+    var aggregation: MetricDefinition.Aggregation = .dailyAverage
+    var direction: MetricTrend.MetricDirection = .higherIsBetter
+    /// Which measurement type to query. Must match the category dashboard's queryMeasurementType.
+    var queryMeasurementType: MeasurementType = .metric
+    /// Optional hour-of-day filter (e.g. `0...5` for overnight/sleep readings).
+    var hourFilter: ClosedRange<Int>? = nil
     @EnvironmentObject var measurementStore: MeasurementStore
     @EnvironmentObject var sourcePrefs: SourcePreferenceStore
 
@@ -36,8 +42,11 @@ struct MetricTrendView: View {
 
     private var dataPoints: [DataPoint] {
         guard let start = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) else { return [] }
-        // Query across ALL measurement types, filtered to enabled sources
-        let raw = metricIndex.query(type: metricType, from: start, to: Date(), filter: sourcePrefs)
+        var raw = metricIndex.query(type: metricType, measurementType: queryMeasurementType,
+                                    from: start, to: Date(), filter: sourcePrefs)
+        if let range = hourFilter {
+            raw = raw.filter { range.contains(cal.component(.hour, from: $0.timestamp)) }
+        }
         guard displayMultiplier != 1 else { return raw }
         return raw.map { DataPoint(timestamp: $0.timestamp, endTimestamp: $0.endTimestamp,
                                    type: $0.type, value: $0.value * displayMultiplier,
@@ -51,7 +60,24 @@ struct MetricTrendView: View {
     }
 
     private var stats: MetricAggregator.PeriodStats {
-        MetricAggregator.periodStats(dataPoints)
+        // Use the same aggregation method as the category dashboard so trend %
+        // matches the per-metric badge shown in the dashboard header.
+        let metricDef = MetricDefinition(
+            id: metricType, title: title, unit: unit, color: color,
+            aggregation: aggregation, direction: direction,
+            hourFilter: hourFilter
+        )
+        let daily = CategoryDashboardView.toDailyValues(dataPoints, metric: metricDef)
+        let dailyVals = daily.map(\.value)
+        let allValues = dataPoints.map(\.value)
+        let trend = dailyVals.count >= 2 ? HealthScore.regressionPercentChange(dailyVals) : 0
+        return MetricAggregator.PeriodStats(
+            avg: allValues.isEmpty ? 0 : allValues.reduce(0, +) / Double(allValues.count),
+            min: allValues.min() ?? 0,
+            max: allValues.max() ?? 0,
+            trend: trend,
+            count: allValues.count
+        )
     }
 
     var body: some View {
@@ -110,14 +136,27 @@ struct MetricTrendView: View {
                     Text(String(format: "%+.1f%%", stats.trend))
                         .font(.headline.monospacedDigit())
                 }
-                .foregroundColor(stats.trend >= 0 ? .green : .orange)
-                Text("Trend").font(.caption2).foregroundColor(.gray)
+                .foregroundColor(trendColor)
+                Text(hourFilter != nil ? "Trend (sleep)" : "Trend")
+                    .font(.caption2).foregroundColor(.gray)
             }
             .frame(maxWidth: .infinity)
         }
         .padding()
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
+    }
+
+    /// Color the trend percentage based on whether the change is healthy.
+    private var trendColor: Color {
+        let pct = stats.trend
+        guard abs(pct) >= 1 else { return .gray }
+        let isHealthy: Bool
+        switch direction {
+        case .higherIsBetter: isHealthy = pct >= 0
+        case .lowerIsBetter:  isHealthy = pct <= 0
+        }
+        return isHealthy ? .green : .orange
     }
 
     private func statItem(_ label: String, _ value: String, _ unit: String) -> some View {

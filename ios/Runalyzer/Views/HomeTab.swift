@@ -102,22 +102,10 @@ struct HomeTab: View {
     // MARK: - Heart
 
     private var heartTile: some View {
-        // Use all 4 metrics — same as CategoryDashboardView.heart()
-        let monthAgo = cal.date(byAdding: .day, value: -30, to: Date())!
-
-        let trend = HealthScore.heartTrend(
-            rhrDailyValues: dailyValues(metricIndex.query(
-                type: DataType.restingHeartRate, measurementType: .metric,
-                from: monthAgo, to: Date(), filter: sourcePrefs)),
-            hrvDailyValues: dailyAvgValues(metricIndex.query(
-                type: DataType.hrvSDNN, measurementType: .metric,
-                from: monthAgo, to: Date(), filter: sourcePrefs)),
-            vo2DailyValues: dailyValues(metricIndex.query(
-                type: DataType.vo2Max, measurementType: .metric,
-                from: monthAgo, to: Date(), filter: sourcePrefs)),
-            spo2DailyValues: dailyValues(metricIndex.query(
-                type: DataType.bloodOxygen, measurementType: .metric,
-                from: monthAgo, to: Date(), filter: sourcePrefs))
+        let heartDef = CategoryDashboardView.heart()
+        let trend = CategoryDashboardView.computeTrend(
+            metrics: heartDef.metrics, days: 30,
+            metricIndex: metricIndex, sourcePrefs: sourcePrefs
         )
 
         let trendIcon: String
@@ -232,28 +220,10 @@ struct HomeTab: View {
     // MARK: - Activity
 
     private var activityTile: some View {
-        let monthAgo = cal.date(byAdding: .day, value: -30, to: Date())!
-
-        let stepPoints = metricIndex.query(type: DataType.steps, measurementType: .metric,
-                                           from: monthAgo, to: Date(), filter: sourcePrefs)
-        let distPoints = metricIndex.query(type: DataType.distance, measurementType: .metric,
-                                           from: monthAgo, to: Date(), filter: sourcePrefs)
-
-        // Daily workout minutes from WorkoutStore
-        let workouts = workoutStore.workouts(from: monthAgo, to: Date())
-        var workoutByDay: [Date: Double] = [:]
-        for w in workouts {
-            let day = cal.startOfDay(for: w.startDate)
-            workoutByDay[day, default: 0] += (w.durationSec ?? 0) / 60
-        }
-        let workoutMinValues = workoutByDay.keys.sorted().map {
-            (date: $0, value: workoutByDay[$0]!)
-        }
-
-        let trend = HealthScore.activityTrend(
-            stepValues: dailyValues(stepPoints),
-            workoutMinValues: workoutMinValues,
-            distanceValues: dailyValues(distPoints)
+        let activityDef = CategoryDashboardView.activity()
+        let trend = CategoryDashboardView.computeTrend(
+            metrics: activityDef.metrics, days: 30,
+            metricIndex: metricIndex, sourcePrefs: sourcePrefs
         )
 
         let trendIcon: String
@@ -404,26 +374,4 @@ struct HomeTab: View {
         return h > 0 ? String(format: "%dh %02dm", h, min) : String(format: "%dm", min)
     }
 
-    /// One value per day (latest value for the day).
-    private func dailyValues(_ points: [DataPoint]) -> [(date: Date, value: Double)] {
-        var byDay: [Date: Double] = [:]
-        for p in points {
-            let day = cal.startOfDay(for: p.timestamp)
-            byDay[day] = p.value // last value wins
-        }
-        return byDay.keys.sorted().map { (date: $0, value: byDay[$0]!) }
-    }
-
-    /// One value per day (daily average).
-    private func dailyAvgValues(_ points: [DataPoint]) -> [(date: Date, value: Double)] {
-        var byDay: [Date: [Double]] = [:]
-        for p in points {
-            let day = cal.startOfDay(for: p.timestamp)
-            byDay[day, default: []].append(p.value)
-        }
-        return byDay.keys.sorted().map { day in
-            let vals = byDay[day]!
-            return (date: day, value: vals.reduce(0, +) / Double(vals.count))
-        }
-    }
 }
