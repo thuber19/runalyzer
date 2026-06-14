@@ -54,7 +54,8 @@ class MeasurementStore: ObservableObject {
             // Batch-load all data points for fluid intake and check-in (2-4 DPs each)
             let lightweightTypes: Set<String> = [
                 MeasurementType.fluidIntake.rawValue,
-                MeasurementType.checkIn.rawValue
+                MeasurementType.checkIn.rawValue,
+                MeasurementType.saunaSession.rawValue
             ]
             let lightweightIDs = records.filter { lightweightTypes.contains($0.type) }.map(\.id)
             if !lightweightIDs.isEmpty {
@@ -392,6 +393,33 @@ class MeasurementStore: ObservableObject {
         } catch {
             AppLogger.storage.error("dailyMetricSummaries failed: \(error.localizedDescription)")
             return []
+        }
+    }
+
+    /// Remove raw data files in storageDir that are not referenced by any measurement or workout.
+    func cleanOrphanedRawFiles(workoutStore: WorkoutStore) {
+        let dir = storageDir
+        let fm = FileManager.default
+
+        guard let allFiles = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
+        let rawFiles = Set(allFiles.filter { $0.hasPrefix("imu_") })
+        guard !rawFiles.isEmpty else { return }
+
+        var referencedFiles = Set<String>()
+        for m in measurements {
+            referencedFiles.formUnion(m.rawDataFiles)
+        }
+        for w in workoutStore.workouts {
+            referencedFiles.formUnion(w.rawDataFiles)
+        }
+
+        let orphans = rawFiles.subtracting(referencedFiles)
+        for file in orphans {
+            try? fm.removeItem(at: dir.appendingPathComponent(file))
+            AppLogger.storage.info("Removed orphaned raw file: \(file)")
+        }
+        if !orphans.isEmpty {
+            AppLogger.storage.info("Cleaned \(orphans.count) orphaned raw file(s)")
         }
     }
 

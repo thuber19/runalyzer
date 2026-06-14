@@ -20,19 +20,19 @@ struct ContentView: View {
             } else {
                 TabView(selection: $selectedTab) {
                     HomeTab()
-                        .tabItem { Label("Home", systemImage: "house") }
+                        .tabItem { Label(String(localized: "tab.home"), systemImage: "house") }
                         .tag(0)
 
                     RunalyzerTab()
-                        .tabItem { Label("Runalyzer", systemImage: "waveform.path.ecg") }
+                        .tabItem { Label(String(localized: "tab.runalyzer"), systemImage: "waveform.path.ecg") }
                         .tag(1)
 
                     DataTab()
-                        .tabItem { Label("Data", systemImage: "cylinder.split.1x2") }
+                        .tabItem { Label(String(localized: "tab.data"), systemImage: "cylinder.split.1x2") }
                         .tag(2)
 
                     SettingsView()
-                        .tabItem { Label("Settings", systemImage: "gearshape") }
+                        .tabItem { Label(String(localized: "tab.settings"), systemImage: "gearshape") }
                         .tag(3)
                 }
                 .overlay { if showMeasuring { scaleMeasurementOverlay } }
@@ -75,7 +75,7 @@ struct ContentView: View {
                         .font(.system(size: 64))
                         .foregroundColor(.green)
                         .transition(.scale.combined(with: .opacity))
-                    Text("Done!")
+                    Text(String(localized: "measurement.complete.done"))
                         .font(.title2.bold())
                         .foregroundColor(.green)
                     if let w = appWiring.scaleProvider?.lastMeasurement?.weightKg {
@@ -102,10 +102,12 @@ struct ContentView: View {
 
                     Text(scale?.liveWeight ?? 0 > 0
                          ? String(format: "%.1f kg", scale?.liveWeight ?? 0)
-                         : "Measuring...")
+                         : String(localized: "scale.measuring"))
                         .font(.title2.bold().monospacedDigit())
 
-                    Text(scale?.isStable == true ? "Locking in..." : "Hold still...")
+                    Text(scale?.isStable == true
+                         ? String(localized: "scale.locking_in")
+                         : String(localized: "scale.hold_still"))
                         .font(.caption)
                         .foregroundColor(.gray)
                 }

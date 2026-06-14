@@ -365,6 +365,8 @@ struct MeasurementDetailView: View {
             Text(value).font(.title3.bold().monospacedDigit())
             Text(label).font(.caption2).foregroundColor(.gray)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(value)")
     }
 
     private func dataRow(label: String, value: String, unit: String, source: String) -> some View {
@@ -377,6 +379,8 @@ struct MeasurementDetailView: View {
                 Text("· \(source)").font(.caption2).foregroundColor(.cyan)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(value) \(unit)")
     }
 
     private func formatMinutes(_ m: Double) -> String {

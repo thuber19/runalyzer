@@ -56,7 +56,7 @@ enum SleepScore {
             durationScore: dur,
             consistencyScore: con,
             interruptionScore: intr,
-            label: scoreLabel(total)
+            label: label(for: total)
         )
     }
 
@@ -162,10 +162,7 @@ enum SleepScore {
 
     // MARK: - Helpers
 
-    /// Human-readable label for a sleep score value.
-    static func label(for score: Int) -> String { scoreLabel(score) }
-
-    private static func scoreLabel(_ score: Int) -> String {
+    static func label(for score: Int) -> String {
         switch score {
         case 75...: return "Excellent"
         case 50...: return "Good"

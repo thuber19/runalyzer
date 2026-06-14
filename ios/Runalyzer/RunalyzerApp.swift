@@ -18,6 +18,8 @@ struct RunalyzerApp: App {
     @StateObject private var drinkTemplateStore: DrinkTemplateStore
     @StateObject private var fluidIntakeProvider: FluidIntakeProvider
     @StateObject private var checkInProvider: CheckInProvider
+    @StateObject private var watchConnectivity = WatchConnectivityManager()
+    @StateObject private var saunaSyncProvider: SaunaSyncProvider
 
     @State private var databaseFailed = false
 
@@ -39,6 +41,7 @@ struct RunalyzerApp: App {
         _drinkTemplateStore = StateObject(wrappedValue: DrinkTemplateStore())
         _fluidIntakeProvider = StateObject(wrappedValue: FluidIntakeProvider(measurementStore: measurementStore))
         _checkInProvider = StateObject(wrappedValue: CheckInProvider(measurementStore: measurementStore))
+        _saunaSyncProvider = StateObject(wrappedValue: SaunaSyncProvider(measurementStore: measurementStore))
     }
 
     var body: some Scene {
@@ -64,6 +67,9 @@ struct RunalyzerApp: App {
                                    healthKit: healthKit, profileProvider: profileProvider,
                                    habitStore: habitStore)
                     checkInProvider.scheduleNotifications()
+                    store.cleanOrphanedRawFiles(workoutStore: workoutStore)
+                    watchConnectivity.configure(saunaSyncProvider: saunaSyncProvider)
+                    watchConnectivity.activate()
                 }
                 .alert("Database Error", isPresented: $databaseFailed) {
                     Button("OK", role: .cancel) {}

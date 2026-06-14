@@ -102,6 +102,7 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
         case .labResults:   return "Lab Results"
         case .fluidIntake:  return "Drink"
         case .checkIn:      return "Check-in"
+        case .saunaSession: return "Sauna"
         }
     }
 
@@ -206,6 +207,14 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
             let volume = dataPoints.first(where: { $0.type == DataType.fluidVolume })?.value ?? 0
             let category = dataPoints.first(where: { $0.type == DataType.fluidCategory })?.unit ?? "drink"
             return String(format: "%@ · %.0f mL", category.capitalized, volume)
+        case .saunaSession:
+            let rounds = dataPoints.filter { $0.type == DataType.saunaRound }
+            if rounds.isEmpty { return "Sauna" }
+            let totalSec = rounds.reduce(0) { $0 + $1.value }
+            let m = Int(totalSec) / 60
+            let types = rounds.compactMap { SaunaRoundType(rawValue: $0.unit)?.label }
+            let uniqueTypes = Array(Set(types))
+            return String(format: "%d rounds · %d min · %@", rounds.count, m, uniqueTypes.joined(separator: ", "))
         case .checkIn:
             if let readiness = dataPoints.first(where: { $0.type == DataType.morningReadiness }) {
                 let labels = ["", "Exhausted", "Tired", "OK", "Good", "Great"]
@@ -239,6 +248,7 @@ struct SensorMeasurement: Codable, Identifiable, Sendable {
         case .labResults:  return "cross.case"
         case .fluidIntake: return "drop.fill"
         case .checkIn:     return "face.smiling"
+        case .saunaSession: return "flame.fill"
         }
     }
 
@@ -279,6 +289,7 @@ enum MeasurementType: String, Codable, Sendable {
     case labResults = "lab_results" // manual blood work / lab results entry
     case fluidIntake = "fluid_intake" // drink/fluid log (water, coffee, alcohol, etc.)
     case checkIn = "check_in"       // subjective self-assessment (morning readiness, evening energy)
+    case saunaSession = "sauna_session" // sauna visit with multiple rounds (synced from Apple Watch)
 }
 
 // MARK: - Source string convention helpers
@@ -316,6 +327,11 @@ extension MeasurementSource {
         return MeasurementSource(deviceType: type, deviceName: name,
                                  serialNumber: nil, algorithmName: nil)
     }
+
+    /// Source for sauna sessions tracked on the companion watchOS app.
+    static let watchApp = MeasurementSource(
+        deviceType: "apple_watch", deviceName: "Apple Watch",
+        serialNumber: nil, algorithmName: nil)
 }
 
 // MARK: - Well-known data point types
@@ -449,6 +465,9 @@ enum DataType {
         case recoveryBaselineSDNN: return "30d Avg SDNN"
         case recoveryBaselineRHR: return "30d Avg RHR"
         case recoveryConfidence: return "Confidence"
+        case saunaRound: return "Sauna Round"
+        case saunaTotalRounds: return "Total Rounds"
+        case saunaTotalDuration: return "Total Duration"
         default: return labDisplayName(type)
         }
     }
@@ -487,6 +506,11 @@ enum DataType {
     static let eveningEnergy    = "evening_energy"        // 1–5 scale (how was energy)
     static let checkInTag       = "check_in_tag"          // value=1.0, unit stores tag name
 
+    // Sauna session
+    static let saunaRound         = "sauna_round"          // value = duration_sec, unit = round type (finnish, bio_mild, steam, cold_plunge, whirlpool, rest)
+    static let saunaTotalRounds   = "sauna_total_rounds"   // value = count of rounds
+    static let saunaTotalDuration = "sauna_total_duration" // value = total seconds across all rounds
+
     // Recovery score (recovery_v1) — overnight HRV + RHR, z-score normalized
     static let recoveryIndex        = "recovery_index"          // 0–100 (higher = better recovered)
     static let recoveryHRVComponent = "recovery_hrv_component"  // 0–100 from overnight SDNN z-score
@@ -494,4 +518,37 @@ enum DataType {
     static let recoveryBaselineSDNN = "recovery_baseline_sdnn"  // 30-day avg overnight SDNN (ms)
     static let recoveryBaselineRHR  = "recovery_baseline_rhr"   // 30-day avg RHR (bpm)
     static let recoveryConfidence   = "recovery_confidence"     // 0–1 data quality
+}
+
+// MARK: - Sauna round types (shared with watchOS)
+
+enum SaunaRoundType: String, Codable, CaseIterable, Sendable {
+    case finnish
+    case bioMild = "bio_mild"
+    case steam
+    case coldPlunge = "cold_plunge"
+    case whirlpool
+    case rest
+
+    var label: String {
+        switch self {
+        case .finnish:    return "Finnish"
+        case .bioMild:    return "Bio / Mild"
+        case .steam:      return "Steam"
+        case .coldPlunge: return "Cold Plunge"
+        case .whirlpool:  return "Whirlpool"
+        case .rest:       return "Rest"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .finnish:    return "flame.fill"
+        case .bioMild:    return "flame"
+        case .steam:      return "cloud.fill"
+        case .coldPlunge: return "snowflake"
+        case .whirlpool:  return "drop.circle.fill"
+        case .rest:       return "pause.circle"
+        }
+    }
 }

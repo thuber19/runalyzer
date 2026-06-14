@@ -1,0 +1,66 @@
+import SwiftUI
+
+/// Post-session summary showing all rounds and totals.
+struct SessionSummaryView: View {
+    let session: SaunaSession
+    let onDone: () -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                // Headline
+                Text("Session Complete")
+                    .font(.headline)
+
+                // Summary stats
+                HStack(spacing: 16) {
+                    VStack {
+                        Text("\(session.rounds.count)")
+                            .font(.title2.bold())
+                        Text("Rounds")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    VStack {
+                        Text(formatDuration(session.totalDurationSec))
+                            .font(.title2.bold())
+                        Text("Total")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Divider()
+
+                // Round list
+                ForEach(Array(session.rounds.enumerated()), id: \.element.id) { index, round in
+                    HStack {
+                        Image(systemName: round.type.icon)
+                            .foregroundStyle(round.type.color)
+                            .frame(width: 20)
+                        Text(round.type.label)
+                            .font(.caption)
+                        Spacer()
+                        Text(formatDuration(round.durationSec))
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Button("Done") {
+                    onDone()
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 8)
+            }
+            .padding(.horizontal, 4)
+        }
+        .navigationBarBackButtonHidden(true)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        return String(format: "%d:%02d", m, s)
+    }
+}

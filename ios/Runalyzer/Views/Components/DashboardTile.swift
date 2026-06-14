@@ -65,6 +65,18 @@ struct DashboardTile<Destination: View>: View {
             tileContent
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityHint("Double tap to view details")
+    }
+
+    private var accessibilityDescription: String {
+        var parts = [title, value]
+        if let unit { parts.append(unit) }
+        if let detail { parts.append(detail) }
+        parts.append(period)
+        if let badge { parts.append(badge.text) }
+        return parts.joined(separator: ", ")
     }
 
     private var tileContent: some View {
@@ -161,5 +173,7 @@ struct CustomTile<Destination: View, Content: View>: View {
                 .cornerRadius(12)
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Double tap to view details")
     }
 }
