@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 // MARK: - Data Point Role
 
@@ -549,6 +550,17 @@ enum SaunaRoundType: String, Codable, CaseIterable, Sendable {
         case .coldPlunge: return "snowflake"
         case .whirlpool:  return "drop.circle.fill"
         case .rest:       return "pause.circle"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .finnish:    return .red
+        case .bioMild:    return .orange
+        case .steam:      return .purple
+        case .coldPlunge: return .cyan
+        case .whirlpool:  return .blue
+        case .rest:       return .gray
         }
     }
 }

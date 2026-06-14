@@ -12,9 +12,11 @@ class WorkoutManager: NSObject, ObservableObject {
     private let healthStore = HKHealthStore()
     private let logger = Logger(subsystem: "com.runalyzer.watch", category: "Workout")
 
+    @Published var heartRate: Double?
     var isActive: Bool { session?.state == .running }
 
     func start() {
+        heartRate = nil
         let config = HKWorkoutConfiguration()
         config.activityType = .other
         config.locationType = .indoor
@@ -88,5 +90,18 @@ extension WorkoutManager: HKLiveWorkoutBuilderDelegate {
     func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {}
 
     func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder,
-                        didCollectDataOf collectedTypes: Set<HKSampleType>) {}
+                        didCollectDataOf collectedTypes: Set<HKSampleType>) {
+        for type in collectedTypes {
+            guard let quantityType = type as? HKQuantityType,
+                  quantityType == HKQuantityType.quantityType(forIdentifier: .heartRate) else { continue }
+
+            let bpm = workoutBuilder.statistics(for: quantityType)?
+                .mostRecentQuantity()?
+                .doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+
+            DispatchQueue.main.async { [weak self] in
+                self?.heartRate = bpm
+            }
+        }
+    }
 }

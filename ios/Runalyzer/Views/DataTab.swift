@@ -361,17 +361,19 @@ struct DataTab: View {
             }
 
         case .saunaSession(let m):
-            HStack(spacing: 12) {
-                Image(systemName: "flame.fill")
-                    .foregroundColor(.orange)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Sauna").font(.subheadline)
-                    Text(m.summary).font(.caption).foregroundColor(.gray)
+            NavigationLink(destination: SaunaSessionDetailView(measurement: m)) {
+                HStack(spacing: 12) {
+                    Image(systemName: "flame.fill")
+                        .foregroundColor(.orange)
+                        .frame(width: 24)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sauna").font(.subheadline)
+                        Text(m.summary).font(.caption).foregroundColor(.gray)
+                    }
+                    Spacer()
+                    Text(m.date.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2).foregroundColor(.gray)
                 }
-                Spacer()
-                Text(m.date.formatted(date: .omitted, time: .shortened))
-                    .font(.caption2).foregroundColor(.gray)
             }
         }
     }
