@@ -10,7 +10,18 @@
 		529677EF2FD80CE3003A0E61 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = 529677EE2FD80CE3003A0E61 /* GRDB */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		5293C64D2FDEBD1C00516267 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 529F32F42FCC600C00273D7B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 529F32FB2FCC600C00273D7B;
+			remoteInfo = Runalyzer;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		5293C6492FDEBD1C00516267 /* RunalyzerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RunalyzerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		529F32FC2FCC600C00273D7B /* Runalyzer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Runalyzer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -25,6 +36,11 @@
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		5293C64A2FDEBD1C00516267 /* RunalyzerTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RunalyzerTests;
+			sourceTree = "<group>";
+		};
 		529F32FE2FCC600C00273D7B /* Runalyzer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
@@ -36,6 +52,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		5293C6462FDEBD1C00516267 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		529F32F92FCC600C00273D7B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -58,6 +81,7 @@
 			isa = PBXGroup;
 			children = (
 				529F32FE2FCC600C00273D7B /* Runalyzer */,
+				5293C64A2FDEBD1C00516267 /* RunalyzerTests */,
 				529677E62FD7605A003A0E61 /* Frameworks */,
 				529F32FD2FCC600C00273D7B /* Products */,
 			);
@@ -67,6 +91,7 @@
 			isa = PBXGroup;
 			children = (
 				529F32FC2FCC600C00273D7B /* Runalyzer.app */,
+				5293C6492FDEBD1C00516267 /* RunalyzerTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -74,6 +99,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		5293C6482FDEBD1C00516267 /* RunalyzerTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5293C64F2FDEBD1C00516267 /* Build configuration list for PBXNativeTarget "RunalyzerTests" */;
+			buildPhases = (
+				5293C6452FDEBD1C00516267 /* Sources */,
+				5293C6462FDEBD1C00516267 /* Frameworks */,
+				5293C6472FDEBD1C00516267 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				5293C64E2FDEBD1C00516267 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				5293C64A2FDEBD1C00516267 /* RunalyzerTests */,
+			);
+			name = RunalyzerTests;
+			packageProductDependencies = (
+			);
+			productName = RunalyzerTests;
+			productReference = 5293C6492FDEBD1C00516267 /* RunalyzerTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		529F32FB2FCC600C00273D7B /* Runalyzer */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 529F33072FCC600E00273D7B /* Build configuration list for PBXNativeTarget "Runalyzer" */;
@@ -107,6 +155,10 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					5293C6482FDEBD1C00516267 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = 529F32FB2FCC600C00273D7B;
+					};
 					529F32FB2FCC600C00273D7B = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -130,11 +182,19 @@
 			projectRoot = "";
 			targets = (
 				529F32FB2FCC600C00273D7B /* Runalyzer */,
+				5293C6482FDEBD1C00516267 /* RunalyzerTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		5293C6472FDEBD1C00516267 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		529F32FA2FCC600C00273D7B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -145,6 +205,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		5293C6452FDEBD1C00516267 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		529F32F82FCC600C00273D7B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -154,7 +221,57 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		5293C64E2FDEBD1C00516267 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 529F32FB2FCC600C00273D7B /* Runalyzer */;
+			targetProxy = 5293C64D2FDEBD1C00516267 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		5293C6502FDEBD1C00516267 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = R5L4UJJM3V;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = th.RunalyzerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runalyzer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runalyzer";
+			};
+			name = Debug;
+		};
+		5293C6512FDEBD1C00516267 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = R5L4UJJM3V;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = th.RunalyzerTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Runalyzer.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Runalyzer";
+			};
+			name = Release;
+		};
 		529F33052FCC600E00273D7B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -353,6 +470,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		5293C64F2FDEBD1C00516267 /* Build configuration list for PBXNativeTarget "RunalyzerTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5293C6502FDEBD1C00516267 /* Debug */,
+				5293C6512FDEBD1C00516267 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		529F32F72FCC600C00273D7B /* Build configuration list for PBXProject "Runalyzer" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

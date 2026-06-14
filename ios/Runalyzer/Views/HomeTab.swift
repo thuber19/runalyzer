@@ -156,31 +156,30 @@ struct HomeTab: View {
     // MARK: - Sleep
 
     private var sleepTile: some View {
+        // Read stored sleep score from DB (computed once by SleepMeasurementProvider).
+        let weekAgo = cal.date(byAdding: .day, value: -7, to: Date())!
+        let scorePoints = metricIndex.query(type: DataType.sleepScore, measurementType: .derived,
+                                             from: weekAgo, to: Date())
+        let lastScore = scorePoints.last
+
+        // Get asleep duration from last night's stages for display
         let nights = SleepTrendView.buildSleepNights(
             metricIndex: metricIndex, sourcePrefs: sourcePrefs,
-            lookbackDays: 14, calendar: cal
+            lookbackDays: 2, calendar: cal
         )
         let lastNight = nights.last
-
-        // Compute sleep score for last night
-        let recentBedtimes = nights.suffix(7).compactMap { night -> Date? in
-            night.stages.filter { ["Deep", "Core", "REM"].contains($0.stage) }
-                .map(\.start).min()
-        }
-        let sleepResult: SleepScore.Result? = lastNight.map {
-            SleepScore.fromStages(stages: $0.stages, recentBedtimes: recentBedtimes)
-        }
 
         return CustomTile {
             SleepDashboardView()
         } content: {
             VStack(alignment: .leading, spacing: 6) {
                 Text("SLEEP").font(.caption2).foregroundColor(.gray)
-                if let score = sleepResult {
+                if let sp = lastScore {
+                    let score = Int(sp.value.rounded())
                     HStack(alignment: .firstTextBaseline, spacing: 2) {
-                        Text("\(score.total)").font(.title.bold().monospacedDigit())
-                            .foregroundColor(sleepScoreColor(score.total))
-                        Text(score.label).font(.caption2).foregroundColor(.gray)
+                        Text("\(score)").font(.title.bold().monospacedDigit())
+                            .foregroundColor(sleepScoreColor(score))
+                        Text(SleepScore.label(for: score)).font(.caption2).foregroundColor(.gray)
                     }
                 } else {
                     Text("--").font(.title.bold()).foregroundColor(.gray)

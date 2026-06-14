@@ -59,6 +59,28 @@ struct SleepDashboardView: View {
         )
     }
 
+    /// Read a stored sleep score + components from the DB for a given night.
+    private func storedScore(for nightDate: Date) -> SleepScore.Result? {
+        let dayStart = cal.startOfDay(for: nightDate)
+        guard let dayEnd = cal.date(byAdding: .day, value: 1, to: dayStart) else { return nil }
+        let points = metricIndex.query(type: DataType.sleepScore, measurementType: .derived,
+                                        from: dayStart, to: dayEnd)
+        guard let total = points.last else { return nil }
+        let dur = metricIndex.query(type: DataType.sleepDurationComponent, measurementType: .derived,
+                                     from: dayStart, to: dayEnd).last?.value ?? 0
+        let con = metricIndex.query(type: DataType.sleepConsistencyComponent, measurementType: .derived,
+                                     from: dayStart, to: dayEnd).last?.value ?? 0
+        let intr = metricIndex.query(type: DataType.sleepInterruptionComponent, measurementType: .derived,
+                                      from: dayStart, to: dayEnd).last?.value ?? 0
+        return SleepScore.Result(
+            total: Int(total.value.rounded()),
+            durationScore: Int(dur.rounded()),
+            consistencyScore: Int(con.rounded()),
+            interruptionScore: Int(intr.rounded()),
+            label: SleepScore.label(for: Int(total.value.rounded()))
+        )
+    }
+
     private func scoreNight(_ night: SleepTrendView.SleepNight,
                              allNights: [SleepTrendView.SleepNight]) -> SleepScore.Result {
         let recentBedtimes = allNights
@@ -82,7 +104,8 @@ struct SleepDashboardView: View {
         guard let lastNight = nights.last else {
             return AnyView(noDataCard)
         }
-        let score = scoreNight(lastNight, allNights: nights)
+        // Read stored score from DB (computed once by SleepMeasurementProvider)
+        let score = storedScore(for: lastNight.date) ?? scoreNight(lastNight, allNights: nights)
         let bt = bedtime(for: lastNight)
 
         // Average bedtime from last 30 nights

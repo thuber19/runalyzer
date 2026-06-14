@@ -162,6 +162,9 @@ enum SleepScore {
 
     // MARK: - Helpers
 
+    /// Human-readable label for a sleep score value.
+    static func label(for score: Int) -> String { scoreLabel(score) }
+
     private static func scoreLabel(_ score: Int) -> String {
         switch score {
         case 75...: return "Excellent"

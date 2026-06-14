@@ -404,6 +404,55 @@ enum DataType {
     static let vitaminB12       = "vitamin_b12"            // pg/mL
     static let crp              = "crp"                    // mg/L — inflammation marker
 
+    /// Human-readable display name for any data type.
+    static func displayName(_ type: String) -> String {
+        switch type {
+        case weight: return "Weight"
+        case impedance: return "Impedance"
+        case bmi: return "BMI"
+        case bodyFatPercent: return "Body Fat"
+        case fatMassKg: return "Fat Mass"
+        case fatFreeMassKg: return "Fat-Free Mass"
+        case muscleMassKg: return "Muscle Mass"
+        case musclePercent: return "Muscle %"
+        case bodyWaterPercent: return "Body Water"
+        case bmrKcal: return "BMR"
+        case heartRate: return "Heart Rate"
+        case cadence: return "Cadence"
+        case totalSteps: return "Total Steps"
+        case avgCadence: return "Avg Cadence"
+        case peakG: return "Peak g"
+        case durationSec: return "Duration"
+        case distance: return "Distance"
+        case activeCalories: return "Active Calories"
+        case pace: return "Pace"
+        case stepLength: return "Step Length"
+        case runningEconomy: return "Running Economy"
+        case aerobicLoad: return "Aerobic Load"
+        case hrvSDNN: return "HRV (SDNN)"
+        case restingHeartRate: return "Resting HR"
+        case bloodOxygen: return "SpO2"
+        case bodyTemperature: return "Temperature"
+        case vo2Max: return "VO2 Max"
+        case steps: return "Steps"
+        case sleepStage: return "Sleep"
+        case heartRateSample: return "Heart Rate"
+        case workoutType: return "Activity"
+        case workoutDuration: return "Duration"
+        case workoutDistance: return "Distance"
+        case workoutCalories: return "Calories"
+        case workoutAvgHR: return "Avg HR"
+        case workoutMaxHR: return "Max HR"
+        case recoveryIndex: return "Recovery"
+        case recoveryHRVComponent: return "HRV Recovery"
+        case recoveryRHRComponent: return "RHR Recovery"
+        case recoveryBaselineSDNN: return "30d Avg SDNN"
+        case recoveryBaselineRHR: return "30d Avg RHR"
+        case recoveryConfidence: return "Confidence"
+        default: return labDisplayName(type)
+        }
+    }
+
     /// Display name for lab result data types.
     static func labDisplayName(_ type: String) -> String {
         switch type {

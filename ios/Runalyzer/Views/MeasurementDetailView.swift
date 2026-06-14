@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 
 /// Universal detail view for any measurement type.
 /// Structure: type-specific summary → expandable data points → expandable raw JSON.
@@ -88,7 +87,7 @@ struct MeasurementDetailView: View {
                          DataType.cadence, DataType.bloodOxygen].contains(type)
 
         return VStack(alignment: .leading, spacing: 4) {
-            Text(displayName(for: type).uppercased()).font(.caption2).foregroundColor(.gray)
+            Text(DataType.displayName( type).uppercased()).font(.caption2).foregroundColor(.gray)
             if points.count == 1, let p = points.first {
                 HStack {
                     Text(formatValue(p)).font(.title2.bold().monospacedDigit())
@@ -160,238 +159,22 @@ struct MeasurementDetailView: View {
     // MARK: - Lab Results Summary
 
     private var labResultsSummary: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("LAB RESULTS").font(.caption2).foregroundColor(.gray)
-            ForEach(dataPoints.filter { $0.role == .primary }) { p in
-                HStack {
-                    Text(DataType.labDisplayName(p.type))
-                        .font(.subheadline).foregroundColor(.gray)
-                    Spacer()
-                    Text(String(format: p.value == p.value.rounded() ? "%.0f" : "%.1f", p.value))
-                        .font(.subheadline.bold().monospacedDigit())
-                    Text(p.unit)
-                        .font(.caption2).foregroundColor(.gray)
-                }
-            }
-            sourceRow
-        }
-        .padding()
-        .background(Color(hex: 0x16213e))
-        .cornerRadius(12)
+        LabResultsDetailSection(dataPoints: dataPoints, sourceLabel: measurement.sourceLabel)
+            .padding()
+            .background(Color(hex: 0x16213e))
+            .cornerRadius(12)
     }
 
     // MARK: - HK Workout Summary
 
     private var workoutSummary: some View {
-        let dp = dataPoints
-        let activityName = dp.first(where: { $0.type == DataType.workoutType })?.unit ?? "Workout"
-        let duration = dp.first(where: { $0.type == DataType.workoutDuration })?.value ?? 0
-        let distance = dp.first(where: { $0.type == DataType.workoutDistance })?.value
-        let calories = dp.first(where: { $0.type == DataType.workoutCalories })?.value
-        let avgHR = dp.first(where: { $0.type == DataType.workoutAvgHR })?.value
-        let maxHR = dp.first(where: { $0.type == DataType.workoutMaxHR })?.value
-        let hrSamples = dp.filter { $0.type == DataType.heartRateSample }
-
-        return VStack(alignment: .leading, spacing: 12) {
-            // Activity + Duration
-            HStack {
-                Text(activityName).font(.title2.bold())
-                Spacer()
-                Text(formatDuration(duration)).font(.title2.bold().monospacedDigit())
-            }
-
-            // Key metrics — only show distance for distance-based activities
-            let distanceActivities = Set(["Run", "Walk", "Cycle", "Hike", "Swim", "Rowing", "Elliptical", "Skating", "Cross Training"])
-            HStack(spacing: 16) {
-                if let d = distance, d > 0.1, distanceActivities.contains(activityName) {
-                    VStack {
-                        Text(String(format: "%.2f", d)).font(.headline.monospacedDigit())
-                        Text("km").font(.caption2).foregroundColor(.gray)
-                    }
-                }
-                if let c = calories, c > 0 {
-                    VStack {
-                        Text(String(format: "%.0f", c)).font(.headline.monospacedDigit())
-                        Text("kcal").font(.caption2).foregroundColor(.gray)
-                    }
-                }
-                if let avg = avgHR, avg > 0 {
-                    VStack {
-                        Text(String(format: "%.0f", avg)).font(.headline.monospacedDigit())
-                        Text("avg bpm").font(.caption2).foregroundColor(.gray)
-                    }
-                }
-                if let max = maxHR, max > 0 {
-                    VStack {
-                        Text(String(format: "%.0f", max)).font(.headline.monospacedDigit())
-                        Text("max bpm").font(.caption2).foregroundColor(.gray)
-                    }
-                }
-            }
-
-            // HR Zone breakdown
-            if !hrSamples.isEmpty {
-                Divider().background(Color.gray.opacity(0.3))
-                hrZoneBreakdown(hrSamples)
-
-                // HR over time chart
-                Divider().background(Color.gray.opacity(0.3))
-                workoutHRChart(hrSamples)
-
-                // Interval table (5-min averages)
-                Divider().background(Color.gray.opacity(0.3))
-                workoutIntervalTable(hrSamples, duration: duration)
-            }
-
+        VStack(alignment: .leading, spacing: 12) {
+            WorkoutDetailSection(dataPoints: dataPoints)
             sourceRow
         }
         .padding()
         .background(Color(hex: 0x16213e))
         .cornerRadius(12)
-    }
-
-    private func hrZoneBreakdown(_ hrSamples: [DataPoint]) -> some View {
-        let profile = profileProvider.profile
-        let profileZones = profile.hrZones
-        let lowerBounds = profile.hrZoneLowerBounds
-        let colors: [Color] = [.gray, .blue, .green, .orange, .red]
-
-        let zoneDefs = profileZones.enumerated().map { i, zone in
-            HRZoneAnalysis.ZoneDefinition(
-                name: zone.name,
-                range: Double(lowerBounds[i])...Double(zone.maxBPM)
-            )
-        }
-
-        let zoneTimes = HRZoneAnalysis.compute(
-            hrValues: hrSamples.map { (value: $0.value, timestamp: $0.timestamp) },
-            zones: zoneDefs
-        )
-
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("HR ZONES").font(.caption2).foregroundColor(.gray)
-            ForEach(Array(zoneTimes.enumerated()), id: \.offset) { i, zt in
-                let color = colors[min(i, colors.count - 1)]
-                HStack(spacing: 8) {
-                    Text(zt.name).font(.caption).frame(width: 50, alignment: .leading)
-                    GeometryReader { geo in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(color)
-                            .frame(width: geo.size.width * zt.fraction)
-                    }
-                    .frame(height: 14)
-                    Text(formatDuration(zt.seconds))
-                        .font(.caption2.monospacedDigit()).foregroundColor(.gray)
-                        .frame(width: 45, alignment: .trailing)
-                }
-            }
-            Text("Max HR: \(profile.maxHR) bpm · Settings → Body Profile to customize zones")
-                .font(.system(size: 9)).foregroundColor(.gray)
-        }
-    }
-
-    // MARK: - Workout HR Chart
-
-    private func workoutHRChart(_ hrSamples: [DataPoint]) -> some View {
-        let sorted = hrSamples.sorted { $0.timestamp < $1.timestamp }
-
-        return VStack(alignment: .leading, spacing: 4) {
-            Text("HEART RATE OVER TIME").font(.caption2).foregroundColor(.gray)
-            Chart {
-                ForEach(Array(sorted.enumerated()), id: \.offset) { _, p in
-                    LineMark(x: .value("Time", p.timestamp), y: .value("BPM", p.value))
-                        .foregroundStyle(.red)
-                }
-            }
-            .chartYAxis {
-                AxisMarks(position: .leading) { value in
-                    AxisValueLabel { if let v = value.as(Double.self) {
-                        Text(String(format: "%.0f", v)).font(.caption2).foregroundColor(.gray)
-                    }}
-                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
-                        .foregroundStyle(Color.gray.opacity(0.3))
-                }
-            }
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 5)) { value in
-                    AxisValueLabel { if let d = value.as(Date.self) {
-                        Text(Self.timeFmt.string(from: d)).font(.caption2).foregroundColor(.gray)
-                    }}
-                }
-            }
-            .frame(height: 150)
-        }
-    }
-
-    // MARK: - Workout Interval Table
-
-    private func workoutIntervalTable(_ hrSamples: [DataPoint], duration: Double) -> some View {
-        let sorted = hrSamples.sorted { $0.timestamp < $1.timestamp }
-        guard let firstTime = sorted.first?.timestamp else { return AnyView(EmptyView()) }
-
-        // Choose interval: 1-min for workouts < 20min, 5-min otherwise
-        let intervalSec: Double = duration < 1200 ? 60 : 300
-        let intervalLabel = duration < 1200 ? "1 min" : "5 min"
-
-        struct Interval: Identifiable {
-            let id: Int
-            let startOffset: Double
-            let avg: Double, min: Double, max: Double, count: Int
-        }
-
-        var intervals: [Interval] = []
-        let numIntervals = Int(ceil(duration / intervalSec))
-        for i in 0..<numIntervals {
-            let iStart = firstTime.addingTimeInterval(Double(i) * intervalSec)
-            let iEnd = firstTime.addingTimeInterval(Double(i + 1) * intervalSec)
-            let inRange = sorted.filter { $0.timestamp >= iStart && $0.timestamp < iEnd }
-            let values = inRange.map(\.value)
-            if !values.isEmpty {
-                intervals.append(Interval(
-                    id: i,
-                    startOffset: Double(i) * intervalSec,
-                    avg: values.reduce(0, +) / Double(values.count),
-                    min: values.min() ?? 0,
-                    max: values.max() ?? 0,
-                    count: values.count
-                ))
-            }
-        }
-
-        return AnyView(VStack(alignment: .leading, spacing: 4) {
-            Text("HR INTERVALS (\(intervalLabel))").font(.caption2).foregroundColor(.gray)
-
-            // Header
-            HStack {
-                Text("Time").font(.caption2.bold()).frame(width: 50, alignment: .leading)
-                Text("Avg").font(.caption2.bold()).frame(width: 40)
-                Text("Min").font(.caption2.bold()).frame(width: 40)
-                Text("Max").font(.caption2.bold()).frame(width: 40)
-                Spacer()
-            }
-            .foregroundColor(.gray)
-            .padding(.top, 4)
-
-            ForEach(intervals) { iv in
-                HStack {
-                    Text(formatOffset(iv.startOffset))
-                        .font(.caption.monospacedDigit()).foregroundColor(.gray)
-                        .frame(width: 50, alignment: .leading)
-                    Text(String(format: "%.0f", iv.avg))
-                        .font(.caption.monospacedDigit()).frame(width: 40)
-                    Text(String(format: "%.0f", iv.min))
-                        .font(.caption.monospacedDigit()).foregroundColor(.gray).frame(width: 40)
-                    Text(String(format: "%.0f", iv.max))
-                        .font(.caption.monospacedDigit()).foregroundColor(.gray).frame(width: 40)
-                    Spacer()
-                }
-            }
-        })
-    }
-
-    private func formatOffset(_ seconds: Double) -> String {
-        let m = Int(seconds) / 60, s = Int(seconds) % 60
-        return String(format: "%d:%02d", m, s)
     }
 
     // MARK: - IMU Workout Summary
@@ -424,30 +207,10 @@ struct MeasurementDetailView: View {
     // MARK: - Body Comp Summary
 
     private var bodyCompSummary: some View {
-        let dp = dataPoints
-        let primary = dp.filter { $0.role == .primary }
-        let detail = dp.filter { $0.role == .detail }
-
-        return VStack(alignment: .leading, spacing: 8) {
-            Text("BODY COMPOSITION").font(.caption2).foregroundColor(.gray)
-            ForEach(primary) { p in
-                dataRow(label: displayName(for: p.type), value: formatValue(p), unit: p.unit, source: "")
-            }
-            if !detail.isEmpty {
-                DisclosureGroup {
-                    ForEach(detail) { p in
-                        dataRow(label: displayName(for: p.type), value: formatValue(p), unit: p.unit, source: "")
-                    }
-                } label: {
-                    Text("MORE").font(.caption2).foregroundColor(.gray)
-                }
-                .tint(.gray)
-            }
-            sourceRow
-        }
-        .padding()
-        .background(Color(hex: 0x16213e))
-        .cornerRadius(12)
+        BodyCompDetailSection(dataPoints: dataPoints, sourceLabel: measurement.sourceLabel)
+            .padding()
+            .background(Color(hex: 0x16213e))
+            .cornerRadius(12)
     }
 
     // MARK: - Derived Summary (Recovery, Enrichment)
@@ -460,12 +223,12 @@ struct MeasurementDetailView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text("DERIVED").font(.caption2).foregroundColor(.gray)
             ForEach(primary) { p in
-                dataRow(label: displayName(for: p.type), value: formatValue(p), unit: p.unit, source: "")
+                dataRow(label: DataType.displayName(p.type), value: formatValue(p), unit: p.unit, source: "")
             }
             if !detail.isEmpty {
                 DisclosureGroup {
                     ForEach(detail) { p in
-                        dataRow(label: displayName(for: p.type), value: formatValue(p), unit: p.unit, source: "")
+                        dataRow(label: DataType.displayName(p.type), value: formatValue(p), unit: p.unit, source: "")
                     }
                 } label: {
                     Text("DETAILS").font(.caption2).foregroundColor(.gray)
@@ -494,7 +257,7 @@ struct MeasurementDetailView: View {
                         Text(Self.timeFmt.string(from: dp.timestamp))
                             .font(.system(size: 10, design: .monospaced)).foregroundColor(.gray)
                             .frame(width: 55, alignment: .leading)
-                        Text(displayName(for: dp.type))
+                        Text(DataType.displayName( dp.type))
                             .font(.system(size: 10)).foregroundColor(.cyan)
                             .lineLimit(1)
                         Spacer()
@@ -630,70 +393,6 @@ struct MeasurementDetailView: View {
     }
 
     // MARK: - Display Helpers
-
-    private func displayName(for type: String) -> String {
-        switch type {
-        case DataType.weight: return "Weight"
-        case DataType.impedance: return "Impedance"
-        case DataType.bmi: return "BMI"
-        case DataType.bodyFatPercent: return "Body Fat"
-        case DataType.fatMassKg: return "Fat Mass"
-        case DataType.fatFreeMassKg: return "Fat-Free Mass"
-        case DataType.muscleMassKg: return "Muscle Mass"
-        case DataType.musclePercent: return "Muscle %"
-        case DataType.bodyWaterPercent: return "Body Water"
-        case DataType.bmrKcal: return "BMR"
-        case DataType.heartRate: return "Heart Rate"
-        case DataType.cadence: return "Cadence"
-        case DataType.totalSteps: return "Total Steps"
-        case DataType.avgCadence: return "Avg Cadence"
-        case DataType.peakG: return "Peak g"
-        case DataType.durationSec: return "Duration"
-        case DataType.distance: return "Distance"
-        case DataType.activeCalories: return "Active Calories"
-        case DataType.pace: return "Pace"
-        case DataType.stepLength: return "Step Length"
-        case DataType.runningEconomy: return "Running Economy"
-        case DataType.aerobicLoad: return "Aerobic Load"
-        case DataType.hrvSDNN: return "HRV (SDNN)"
-        case DataType.restingHeartRate: return "Resting HR"
-        case DataType.bloodOxygen: return "SpO2"
-        case DataType.bodyTemperature: return "Temperature"
-        case DataType.vo2Max: return "VO2 Max"
-        case DataType.steps: return "Steps"
-        case DataType.sleepStage: return "Sleep"
-        case DataType.heartRateSample: return "Heart Rate"
-        case DataType.workoutType: return "Activity"
-        case DataType.workoutDuration: return "Duration"
-        case DataType.workoutDistance: return "Distance"
-        case DataType.workoutCalories: return "Calories"
-        case DataType.workoutAvgHR: return "Avg HR"
-        case DataType.workoutMaxHR: return "Max HR"
-        case DataType.recoveryIndex: return "Recovery"
-        case DataType.recoveryHRVComponent: return "HRV Recovery"
-        case DataType.recoveryRHRComponent: return "RHR Recovery"
-        case DataType.recoveryBaselineSDNN: return "30d Avg SDNN"
-        case DataType.recoveryBaselineRHR: return "30d Avg RHR"
-        case DataType.recoveryConfidence: return "Confidence"
-        case DataType.glucose: return "Glucose"
-        case DataType.hemoglobinA1C: return "HbA1C"
-        case DataType.totalCholesterol: return "Total Cholesterol"
-        case DataType.ldlCholesterol: return "LDL"
-        case DataType.hdlCholesterol: return "HDL"
-        case DataType.triglycerides: return "Triglycerides"
-        case DataType.ferritin: return "Ferritin"
-        case DataType.vitaminD: return "Vitamin D"
-        case DataType.iron: return "Iron"
-        case DataType.hemoglobin: return "Hemoglobin"
-        case DataType.creatinine: return "Creatinine"
-        case DataType.tsh: return "TSH"
-        case DataType.cortisol: return "Cortisol"
-        case DataType.testosterone: return "Testosterone"
-        case DataType.vitaminB12: return "Vitamin B12"
-        case DataType.crp: return "CRP"
-        default: return type.replacingOccurrences(of: "_", with: " ").capitalized
-        }
-    }
 
     private func formatValue(_ p: DataPoint) -> String {
         switch p.type {

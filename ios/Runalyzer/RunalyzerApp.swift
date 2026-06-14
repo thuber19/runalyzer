@@ -198,22 +198,32 @@ class AppWiring: ObservableObject {
         -> (any DeviceDriver) -> AnyCancellable? {
         { [weak metrics, weak imuProvider] driver in
             guard let imu = driver as? IMUSensorDriver else { return nil }
-            imu.onPacket = { [weak metrics] packet in
-                DispatchQueue.main.async { metrics?.process(packet) }
-            }
-            imu.onDownloadComplete = { [weak imuProvider, weak imu] samples, status, events in
-                guard let imu else { return }
-                // Provider handles: analysis → workout + data points → save → erase
-                imuProvider?.handleDownloadComplete(
-                    samples: samples,
-                    sampleRateHz: Int(status.sampleRateHz),
-                    durationSec: Double(status.recordingDurationSec),
-                    startUnixMs: status.recordingStartUnixMs,
-                    events: events.isEmpty ? nil : events,
-                    driver: imu
-                )
-            }
-            return nil  // callback-based wiring; no Combine subscription to track
+            var cancellables = Set<AnyCancellable>()
+
+            imu.packetPublisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak metrics] packet in
+                    metrics?.process(packet)
+                }
+                .store(in: &cancellables)
+
+            imu.downloadCompletePublisher
+                .receive(on: DispatchQueue.main)
+                .sink { [weak imuProvider, weak imu] result in
+                    guard let imu else { return }
+                    imuProvider?.handleDownloadComplete(
+                        samples: result.samples,
+                        sampleRateHz: Int(result.status.sampleRateHz),
+                        durationSec: Double(result.status.recordingDurationSec),
+                        startUnixMs: result.status.recordingStartUnixMs,
+                        events: result.events.isEmpty ? nil : result.events,
+                        driver: imu
+                    )
+                }
+                .store(in: &cancellables)
+
+            // Return a single cancellable that keeps both subscriptions alive
+            return AnyCancellable { cancellables.removeAll() }
         }
     }
 

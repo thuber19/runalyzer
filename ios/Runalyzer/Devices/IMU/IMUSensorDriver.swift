@@ -23,10 +23,16 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
     @Published var appState: IMUAppState = .disconnected
     @Published var downloadProgress: Float = 0
 
-    // MARK: - Callbacks (for backward compat during migration, will become Combine)
+    // MARK: - Combine publishers
 
-    var onPacket: ((IMUPacket) -> Void)?
-    var onDownloadComplete: (([RecordedSample], IMUDeviceStatus, [IMUDeviceEvent]) -> Void)?
+    struct DownloadResult {
+        let samples: [RecordedSample]
+        let status: IMUDeviceStatus
+        let events: [IMUDeviceEvent]
+    }
+
+    let packetPublisher = PassthroughSubject<IMUPacket, Never>()
+    let downloadCompletePublisher = PassthroughSubject<DownloadResult, Never>()
 
     // MARK: - BLE UUIDs
 
@@ -117,7 +123,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
         }
         switch characteristic.uuid {
         case imuCharUUID:
-            if let pkt = parseIMUPacket(data) { onPacket?(pkt) }
+            if let pkt = parseIMUPacket(data) { packetPublisher.send(pkt) }
         case statusCharUUID:
             parseStatus(data)
         case downloadCharUUID:
@@ -377,7 +383,7 @@ class IMUSensorDriver: NSObject, DeviceDriver, ObservableObject {
             let evts = downloadedEvents
 
             appState = .idle
-            onDownloadComplete?(samples, status, evts)
+            downloadCompletePublisher.send(DownloadResult(samples: samples, status: status, events: evts))
             downloadedSamples.removeAll()
             downloadedEvents.removeAll()
             endBackgroundTask()  // M9: download complete
