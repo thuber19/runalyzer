@@ -61,6 +61,18 @@ class SaunaSyncProvider: ObservableObject {
             unit: "sec", source: "watch:apple_watch", role: .detail
         ))
 
+        // Cold exposure: sum duration of cold_plunge rounds
+        let coldSec = dataPoints
+            .filter { $0.type == DataType.saunaRound && $0.unit == SaunaRoundType.coldPlunge.rawValue }
+            .reduce(0) { $0 + $1.value }
+        if coldSec > 0 {
+            dataPoints.append(DataPoint(
+                timestamp: sessionDate, endTimestamp: nil,
+                type: DataType.coldExposureDuration, value: coldSec,
+                unit: "sec", source: "watch:apple_watch", role: .detail
+            ))
+        }
+
         let measurement = SensorMeasurement(
             id: sessionID,
             date: sessionDate,

@@ -41,7 +41,8 @@ struct CategoryDashboardView: View {
     let color: Color
     let metrics: [MetricDefinition]
     /// Which measurement type to query. Defaults to `.metric` (HealthKit imports).
-    var queryMeasurementType: MeasurementType = .metric
+    /// Set to `nil` to query across all measurement types.
+    var queryMeasurementType: MeasurementType? = .metric
 
     @EnvironmentObject var measurementStore: MeasurementStore
     @EnvironmentObject var sourcePrefs: SourcePreferenceStore
@@ -90,20 +91,17 @@ struct CategoryDashboardView: View {
         let monthAgo = cal.date(byAdding: .day, value: -30, to: today) ?? today
 
         return ForEach(metrics) { metric in
-            let todayPoints = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
-                                                from: today, to: Date(), filter: sourcePrefs)
+            let todayPoints = queryPoints(type: metric.id, from: today, to: Date())
             let todayVal = dailyValue(todayPoints, metric: metric)
 
             // 7-day average for comparison badge
-            let weekPoints = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
-                                               from: weekAgo, to: today, filter: sourcePrefs)
+            let weekPoints = queryPoints(type: metric.id, from: weekAgo, to: today)
             let weekDaily = CategoryDashboardView.toDailyValues(weekPoints, metric: metric)
             let weekAvg = weekDaily.isEmpty ? nil :
                 weekDaily.map(\.value).reduce(0, +) / Double(weekDaily.count)
 
             // 30-day sparkline
-            let monthPoints = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
-                                                from: monthAgo, to: Date(), filter: sourcePrefs)
+            let monthPoints = queryPoints(type: metric.id, from: monthAgo, to: Date())
             let monthDaily = CategoryDashboardView.toDailyValues(monthPoints, metric: metric)
             let sparkline = monthDaily.map(\.value)
 
@@ -188,8 +186,7 @@ struct CategoryDashboardView: View {
         let lookback = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) ?? Date()
 
         return ForEach(metrics) { metric in
-            let points = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
-                                           from: lookback, to: Date(), filter: sourcePrefs)
+            let points = queryPoints(type: metric.id, from: lookback, to: Date())
             let daily = CategoryDashboardView.toDailyValues(points, metric: metric)
             let sparkline = daily.map(\.value)
             let avg = daily.isEmpty ? nil :
@@ -252,7 +249,7 @@ struct CategoryDashboardView: View {
     static func computeTrend(
         metrics: [MetricDefinition],
         days: Int,
-        measurementType: MeasurementType = .metric,
+        measurementType: MeasurementType? = .metric,
         metricIndex: MetricIndex,
         sourcePrefs: SourcePreferenceStore
     ) -> CategoryTrend {
@@ -261,8 +258,13 @@ struct CategoryDashboardView: View {
 
         var inputs: [HealthScore.MetricInput] = []
         for metric in metrics {
-            let points = metricIndex.query(type: metric.id, measurementType: measurementType,
+            let points: [DataPoint]
+            if let mt = measurementType {
+                points = metricIndex.query(type: metric.id, measurementType: mt,
                                            from: historyStart, to: Date(), filter: sourcePrefs)
+            } else {
+                points = metricIndex.query(type: metric.id, from: historyStart, to: Date(), filter: sourcePrefs)
+            }
             let dailyValues = CategoryDashboardView.toDailyValues(points, metric: metric)
             guard !dailyValues.isEmpty else { continue }
 
@@ -332,6 +334,8 @@ struct CategoryDashboardView: View {
             return String(format: "%.1f", v)
         case DataType.wristTemperature:
             return String(format: "%+.1f", v)
+        case DataType.saunaTotalDuration, DataType.coldExposureDuration:
+            return String(format: "%.0f", v / 60)  // seconds → minutes
         default:
             return String(format: "%.0f", v)
         }
@@ -346,8 +350,7 @@ struct CategoryDashboardView: View {
             } else {
                 lookback = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) ?? Date()
             }
-            let points = metricIndex.query(type: metric.id, measurementType: queryMeasurementType,
-                                           from: lookback, to: Date(), filter: sourcePrefs)
+            let points = queryPoints(type: metric.id, from: lookback, to: Date())
             let val: Double
             if timeRange.isDaily {
                 val = dailyValue(points, metric: metric) ?? 0
@@ -370,6 +373,18 @@ struct CategoryDashboardView: View {
         }
         .pickerStyle(.segmented)
         .padding(.horizontal)
+    }
+
+    // MARK: - Query Helper
+
+    /// Routes to filtered or unfiltered MetricIndex query based on `queryMeasurementType`.
+    private func queryPoints(type: String, from startDate: Date, to endDate: Date) -> [DataPoint] {
+        if let mt = queryMeasurementType {
+            return metricIndex.query(type: type, measurementType: mt,
+                                     from: startDate, to: endDate, filter: sourcePrefs)
+        } else {
+            return metricIndex.query(type: type, from: startDate, to: endDate, filter: sourcePrefs)
+        }
     }
 
     // MARK: - Helpers
@@ -479,6 +494,27 @@ extension CategoryDashboardView {
                                  unit: "kcal", color: .red, aggregation: .max,
                                  direction: .higherIsBetter, weight: 0.30),
             ]
+        )
+    }
+
+    /// Recovery Activities: Sauna, Cold Exposure, Mindfulness
+    static func recoveryActivities() -> CategoryDashboardView {
+        CategoryDashboardView(
+            title: "Recovery",
+            icon: "leaf.fill",
+            color: .green,
+            metrics: [
+                MetricDefinition(id: DataType.saunaTotalDuration, title: "Sauna",
+                                 unit: "min", color: .orange, aggregation: .max,
+                                 direction: .higherIsBetter, weight: 0.35),
+                MetricDefinition(id: DataType.coldExposureDuration, title: "Cold Exposure",
+                                 unit: "min", color: .cyan, aggregation: .max,
+                                 direction: .higherIsBetter, weight: 0.30),
+                MetricDefinition(id: DataType.mindfulnessDuration, title: "Mindfulness",
+                                 unit: "min", color: .purple, aggregation: .max,
+                                 direction: .higherIsBetter, weight: 0.35),
+            ],
+            queryMeasurementType: nil
         )
     }
 }

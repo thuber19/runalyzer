@@ -78,6 +78,10 @@ class HealthKitMetricProvider {
         group.enter()
         importSleepMetrics(lookbackDays: lookbackDays) { group.leave() }
 
+        // Mindfulness sessions (category type)
+        group.enter()
+        importMindfulness(lookbackDays: lookbackDays) { group.leave() }
+
         // Workouts (each workout = its own measurement)
         group.enter()
         importWorkouts(lookbackDays: lookbackDays) { group.leave() }
@@ -358,6 +362,63 @@ class HealthKitMetricProvider {
                         existing.dataPoints.append(contentsOf: newPoints)
                         existing.dataPoints.sort { $0.timestamp < $1.timestamp }
                         store.update(existing)
+                    } else {
+                        let measurement = SensorMeasurement(
+                            id: UUID(), date: day, type: .metric,
+                            sources: sources, dataPoints: dps, rawDataFiles: []
+                        )
+                        store.save(measurement)
+                    }
+                }
+                completion()
+            }
+        }
+    }
+
+    // MARK: - Mindfulness Import
+
+    private func importMindfulness(lookbackDays: Int, completion: @escaping () -> Void) {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let rangeStart = cal.date(byAdding: .day, value: -lookbackDays, to: today) else {
+            completion(); return
+        }
+
+        healthKit.fetchMindfulnessSessions(from: rangeStart, to: Date()) { [weak self] sessions in
+            guard let self, let store = self.store else { completion(); return }
+
+            // Group by day
+            var byDay: [Date: [(duration: TimeInterval, sourceName: String)]] = [:]
+            for s in sessions {
+                let day = cal.startOfDay(for: s.start)
+                byDay[day, default: []].append((duration: s.duration, sourceName: s.sourceName))
+            }
+
+            DispatchQueue.main.async {
+                for (day, daySessions) in byDay {
+                    let totalMinutes = daySessions.reduce(0) { $0 + $1.duration } / 60.0
+                    let count = Double(daySessions.count)
+                    let sourceNames = Set(daySessions.map(\.sourceName))
+                    let sources = sourceNames.map { MeasurementSource.healthKitDevice(name: $0) }
+
+                    let dps = [
+                        DataPoint(timestamp: day, endTimestamp: nil,
+                                  type: DataType.mindfulnessDuration, value: totalMinutes,
+                                  unit: "min", source: DataSource.healthKitSource(sourceNames.first ?? "Mindfulness"),
+                                  role: .primary),
+                        DataPoint(timestamp: day, endTimestamp: nil,
+                                  type: DataType.mindfulnessCount, value: count,
+                                  unit: "sessions", source: DataSource.healthKitSource(sourceNames.first ?? "Mindfulness"),
+                                  role: .detail),
+                    ]
+
+                    // Check if we already have mindfulness for this day
+                    if let existing = self.metricIndex.metricMeasurement(forDay: day, containingType: DataType.mindfulnessDuration) {
+                        // Update: replace mindfulness points
+                        var updated = existing
+                        updated.dataPoints.removeAll { $0.type == DataType.mindfulnessDuration || $0.type == DataType.mindfulnessCount }
+                        updated.dataPoints.append(contentsOf: dps)
+                        store.update(updated)
                     } else {
                         let measurement = SensorMeasurement(
                             id: UUID(), date: day, type: .metric,

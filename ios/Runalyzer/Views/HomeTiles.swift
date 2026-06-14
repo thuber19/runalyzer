@@ -333,4 +333,64 @@ extension HomeTab {
         }
         .buttonStyle(.plain)
     }
+
+    // MARK: - Recovery Activities
+
+    var recoveryActivitiesTile: some View {
+        let def = CategoryDashboardView.recoveryActivities()
+        let trend = CategoryDashboardView.computeTrend(
+            metrics: def.metrics, days: 30,
+            measurementType: nil,
+            metricIndex: metricIndex, sourcePrefs: sourcePrefs
+        )
+
+        let weekAgo = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
+
+        // Weekly sauna minutes (stored in seconds)
+        let saunaPoints = metricIndex.query(type: DataType.saunaTotalDuration,
+                                             from: weekAgo, to: Date())
+        let saunaMin = Int(saunaPoints.reduce(0) { $0 + $1.value } / 60)
+
+        // Weekly mindfulness minutes
+        let mindfulPoints = metricIndex.query(type: DataType.mindfulnessDuration,
+                                               from: weekAgo, to: Date())
+        let mindfulMin = Int(mindfulPoints.reduce(0) { $0 + $1.value })
+
+        let trendIcon: String
+        let trendColor: Color
+        switch trend.direction {
+        case .improving: trendIcon = "arrow.up.right"; trendColor = .green
+        case .stable:    trendIcon = "arrow.right";    trendColor = .gray
+        case .declining: trendIcon = "arrow.down.right"; trendColor = .orange
+        }
+
+        return CustomTile {
+            CategoryDashboardView.recoveryActivities()
+        } content: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("RECOVERY").font(.caption2).foregroundColor(.gray)
+                Spacer()
+                HStack(spacing: 6) {
+                    Image(systemName: trendIcon).font(.title3)
+                    Text(trend.direction.rawValue).font(.title3.weight(.semibold))
+                }
+                .foregroundColor(trendColor)
+
+                if saunaMin > 0 || mindfulMin > 0 {
+                    HStack(spacing: 8) {
+                        if saunaMin > 0 {
+                            Label("\(saunaMin)m", systemImage: "flame.fill")
+                                .font(.caption2).foregroundColor(.orange)
+                        }
+                        if mindfulMin > 0 {
+                            Label("\(mindfulMin)m", systemImage: "brain.head.profile")
+                                .font(.caption2).foregroundColor(.purple)
+                        }
+                    }
+                }
+
+                Text("7D").font(.caption2).foregroundColor(.gray.opacity(0.6))
+            }
+        }
+    }
 }

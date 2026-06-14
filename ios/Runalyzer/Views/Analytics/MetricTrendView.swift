@@ -10,8 +10,8 @@ struct MetricTrendView: View {
     let color: Color
     var aggregation: MetricDefinition.Aggregation = .dailyAverage
     var direction: MetricTrend.MetricDirection = .higherIsBetter
-    /// Which measurement type to query. Must match the category dashboard's queryMeasurementType.
-    var queryMeasurementType: MeasurementType = .metric
+    /// Which measurement type to query. Nil queries all types.
+    var queryMeasurementType: MeasurementType? = .metric
     /// Optional hour-of-day filter (e.g. `0...5` for overnight/sleep readings).
     var hourFilter: ClosedRange<Int>? = nil
     @EnvironmentObject var measurementStore: MeasurementStore
@@ -37,13 +37,22 @@ struct MetricTrendView: View {
 
     /// Whether raw values need scaling (e.g. blood oxygen stored as 0–1 fraction).
     private var displayMultiplier: Double {
-        metricType == DataType.bloodOxygen ? 100 : 1
+        switch metricType {
+        case DataType.bloodOxygen: return 100
+        case DataType.saunaTotalDuration, DataType.coldExposureDuration: return 1.0 / 60.0
+        default: return 1
+        }
     }
 
     private var dataPoints: [DataPoint] {
         guard let start = cal.date(byAdding: .day, value: -timeRange.days, to: Date()) else { return [] }
-        var raw = metricIndex.query(type: metricType, measurementType: queryMeasurementType,
+        var raw: [DataPoint]
+        if let mt = queryMeasurementType {
+            raw = metricIndex.query(type: metricType, measurementType: mt,
                                     from: start, to: Date(), filter: sourcePrefs)
+        } else {
+            raw = metricIndex.query(type: metricType, from: start, to: Date(), filter: sourcePrefs)
+        }
         if let range = hourFilter {
             raw = raw.filter { range.contains(cal.component(.hour, from: $0.timestamp)) }
         }

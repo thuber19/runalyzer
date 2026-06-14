@@ -469,6 +469,9 @@ enum DataType {
         case saunaRound: return "Sauna Round"
         case saunaTotalRounds: return "Total Rounds"
         case saunaTotalDuration: return "Total Duration"
+        case mindfulnessDuration: return "Mindfulness"
+        case mindfulnessCount: return "Sessions"
+        case coldExposureDuration: return "Cold Exposure"
         default: return labDisplayName(type)
         }
     }
@@ -511,6 +514,11 @@ enum DataType {
     static let saunaRound         = "sauna_round"          // value = duration_sec, unit = round type (finnish, bio_mild, steam, cold_plunge, whirlpool, rest)
     static let saunaTotalRounds   = "sauna_total_rounds"   // value = count of rounds
     static let saunaTotalDuration = "sauna_total_duration" // value = total seconds across all rounds
+
+    // Recovery activities
+    static let mindfulnessDuration  = "mindfulness_duration"   // total minutes per day
+    static let mindfulnessCount     = "mindfulness_count"      // number of sessions per day
+    static let coldExposureDuration = "cold_exposure_duration"  // total seconds of cold plunge rounds
 
     // Recovery score (recovery_v1) — overnight HRV + RHR, z-score normalized
     static let recoveryIndex        = "recovery_index"          // 0–100 (higher = better recovered)

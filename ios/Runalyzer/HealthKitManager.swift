@@ -139,6 +139,7 @@ class HealthKitManager: ObservableObject {
         types.insert(HKObjectType.workoutType())
         // Characteristic types (sex, DOB) don't need authorization — they're always readable
         if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) { types.insert(sleep) }
+        if let mindful = HKObjectType.categoryType(forIdentifier: .mindfulSession) { types.insert(mindful) }
         return types
     }()
 
@@ -186,6 +187,7 @@ class HealthKitManager: ObservableObject {
             HKQuantityType.quantityType(forIdentifier: .restingHeartRate)!,
             HKQuantityType.quantityType(forIdentifier: .stepCount)!,
             HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            HKObjectType.categoryType(forIdentifier: .mindfulSession)!,
         ]
 
         for type in immediateTypes {
@@ -845,6 +847,31 @@ class HealthKitManager: ObservableObject {
                         sourceName: s.sourceRevision.source.name)
             }
             completion(samples)
+        }
+        store.execute(query)
+    }
+
+    // MARK: - Mindfulness
+
+    /// Fetch mindfulness sessions from HealthKit for a time range.
+    func fetchMindfulnessSessions(
+        from startDate: Date, to endDate: Date,
+        completion: @escaping ([(duration: TimeInterval, start: Date, end: Date, sourceName: String)]) -> Void
+    ) {
+        guard let mindfulType = HKObjectType.categoryType(forIdentifier: .mindfulSession) else {
+            completion([]); return
+        }
+        let predicate = HKQuery.predicateForSamples(withStart: startDate, end: endDate, options: .strictStartDate)
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let query = HKSampleQuery(sampleType: mindfulType, predicate: predicate,
+                                  limit: HKObjectQueryNoLimit, sortDescriptors: [sort]) { _, results, error in
+            if let error { AppLogger.health.error("Mindfulness fetch: \(error.localizedDescription)") }
+            let sessions = (results as? [HKCategorySample] ?? []).map { s in
+                (duration: s.endDate.timeIntervalSince(s.startDate),
+                 start: s.startDate, end: s.endDate,
+                 sourceName: s.sourceRevision.source.name)
+            }
+            completion(sessions)
         }
         store.execute(query)
     }

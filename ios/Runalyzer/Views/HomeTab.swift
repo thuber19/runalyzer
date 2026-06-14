@@ -28,6 +28,8 @@ struct HomeTab: View {
 
                     recoveryTile
 
+                    recoveryActivitiesTile
+
                     HStack(spacing: 12) { heartTile; sleepTile }
 
                     HStack(spacing: 12) { activityTile; habitsTile }
