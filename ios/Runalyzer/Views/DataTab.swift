@@ -22,6 +22,7 @@ struct DataTab: View {
     @State private var filter: DataFilter = .all
     @State private var showDeleteAll = false
     @State private var showDrinkLog = false
+    @State private var showLabEntry = false
 
     private let cal = Calendar.current
 
@@ -173,24 +174,31 @@ struct DataTab: View {
             .background(Color.appBackground)
             .navigationTitle("Data")
             .toolbar {
-                if filter == .fluid {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showDrinkLog = true
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Delete All", role: .destructive) {
-                        showDeleteAll = true
+                    HStack(spacing: 12) {
+                        if filter == .fluid || filter == .labs {
+                            Button {
+                                if filter == .fluid {
+                                    showDrinkLog = true
+                                } else {
+                                    showLabEntry = true
+                                }
+                            } label: {
+                                Image(systemName: "plus")
+                            }
+                        }
+                        Button("Delete All", role: .destructive) {
+                            showDeleteAll = true
+                        }
+                        .foregroundColor(.red)
                     }
-                    .foregroundColor(.red)
                 }
             }
             .sheet(isPresented: $showDrinkLog) {
                 DrinkLogSheet()
+            }
+            .sheet(isPresented: $showLabEntry) {
+                LabResultsEntrySheet()
             }
             .alert("Delete all data?", isPresented: $showDeleteAll) {
                 Button("Delete All", role: .destructive) {

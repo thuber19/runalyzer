@@ -33,6 +33,11 @@ struct SettingsView: View {
                         Label("Manage Devices", systemImage: "antenna.radiowaves.left.and.right")
                     }
                     .listRowBackground(Color(hex: 0x16213e))
+
+                    NavigationLink(destination: RunalyzerTab()) {
+                        Label("IMU Sensor Dashboard", systemImage: "waveform.path.ecg")
+                    }
+                    .listRowBackground(Color(hex: 0x16213e))
                 }
 
                 // User Profile (for body composition)

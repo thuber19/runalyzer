@@ -1,7 +1,7 @@
 import SwiftUI
 import Charts
 
-/// Dashboard home page with health overview tiles.
+/// Dashboard home page with Aura hero, action strip, and editorial feed.
 struct HomeTab: View {
     @EnvironmentObject var measurementStore: MeasurementStore
     @EnvironmentObject var sourcePrefs: SourcePreferenceStore
@@ -13,62 +13,100 @@ struct HomeTab: View {
     var metricIndex: MetricIndex { MetricIndex(store: measurementStore) }
     let cal = Calendar.current
 
-    @State var showLabEntry = false
     @State var showDrinkLog = false
     @State var showEveningCheckIn = false
+    @State private var navigateToHabits = false
+    @State private var navigateToHydration = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 12) {
-                    // Evening check-in banner (shows after 6 PM if not done)
+                VStack(spacing: 0) {
+                    // Zone 1: Aura Hero
+                    let today = cal.startOfDay(for: Date())
+                    let recovery = latestRecoveryScore(on: today)
+                    let weekAgo = cal.date(byAdding: .day, value: -7, to: today)!
+                    let sleepPoints = metricIndex.query(type: DataType.sleepScore,
+                                                        measurementType: .derived,
+                                                        from: weekAgo, to: Date())
+                    let sleep = sleepPoints.last.map { $0.value }
+
+                    let heartDef = CategoryDashboardView.heart()
+                    let heartTrend = CategoryDashboardView.computeTrend(
+                        metrics: heartDef.metrics, days: 30,
+                        metricIndex: metricIndex, sourcePrefs: sourcePrefs)
+
+                    let vibeScore = computeVibeScore(recovery: recovery, sleep: sleep)
+                    let headline = generateHeadline(recovery: recovery, sleep: sleep,
+                                                     heartTrend: heartTrend.direction)
+
+                    NavigationLink {
+                        RecoveryDashboardView()
+                    } label: {
+                        AuraHeroView(
+                            vibeScore: vibeScore,
+                            headline: headline,
+                            recoveryScore: recovery,
+                            sleepScore: sleep
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    // Zone 2: Action Strip
+                    let scheduled = habitStore.habits.filter { $0.isScheduled(on: today) }
+                    let storedGoal = UserDefaults.standard.integer(forKey: "hydration_goal_ml")
+                    let hydrationGoal = Double(storedGoal > 0 ? storedGoal : 2500)
+
+                    ActionStripView(
+                        habits: scheduled,
+                        todayLogs: habitStore.todayLogs,
+                        hydrationMl: fluidIntakeProvider.todayTotalMl,
+                        hydrationGoal: hydrationGoal,
+                        onToggleHabit: { habit in
+                            _ = habitStore.toggleCompletion(habitId: habit.id)
+                        },
+                        onDrinkTap: { showDrinkLog = true },
+                        onHabitsLongPress: { navigateToHabits = true },
+                        onHydrationLongPress: { navigateToHydration = true }
+                    )
+                    .padding(.top, 16)
+
+                    // Evening check-in banner
                     if isEveningAndCheckInPending {
                         eveningCheckInBanner
+                            .padding(.horizontal, 16)
+                            .padding(.top, 16)
                     }
 
-                    // Today
-                    Text("TODAY").font(.caption2.bold()).foregroundColor(.gray)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    // Zone 3: Editorial Feed
+                    let insights = buildInsights()
 
-                    HStack(spacing: 12) { recoveryTile; sleepTile }
-
-                    HStack(spacing: 12) { habitsTile; hydrationTile }
-
-                    // Trends
-                    Text("TRENDS").font(.caption2.bold()).foregroundColor(.gray)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 4)
-
-                    HStack(spacing: 12) { heartTile; activityTile }
-
-                    HStack(spacing: 12) { recoveryActivitiesTile; bodyCompTile }
-
-                    HStack(spacing: 12) { workoutsTile; labResultsTile }
+                    EditorialFeedView(insights: insights)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 20)
                 }
-                .padding()
             }
             .background(Color(hex: 0x1a1a2e))
-            .navigationTitle("Home")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button { showDrinkLog = true } label: {
-                            Image(systemName: "drop.fill")
-                        }
-                        Button { showLabEntry = true } label: {
-                            Image(systemName: "cross.case")
-                        }
+                    Button { showDrinkLog = true } label: {
+                        Image(systemName: "drop.fill")
                     }
                 }
-            }
-            .sheet(isPresented: $showLabEntry) {
-                LabResultsEntrySheet()
             }
             .sheet(isPresented: $showDrinkLog) {
                 DrinkLogSheet()
             }
             .sheet(isPresented: $showEveningCheckIn) {
                 EveningCheckInSheet()
+            }
+            .navigationDestination(isPresented: $navigateToHabits) {
+                HabitsView()
+            }
+            .navigationDestination(isPresented: $navigateToHydration) {
+                FluidDashboardView()
             }
         }
     }

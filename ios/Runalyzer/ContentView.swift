@@ -23,17 +23,13 @@ struct ContentView: View {
                         .tabItem { Label(String(localized: "tab.home"), systemImage: "house") }
                         .tag(0)
 
-                    RunalyzerTab()
-                        .tabItem { Label(String(localized: "tab.runalyzer"), systemImage: "waveform.path.ecg") }
-                        .tag(1)
-
                     DataTab()
                         .tabItem { Label(String(localized: "tab.data"), systemImage: "cylinder.split.1x2") }
-                        .tag(2)
+                        .tag(1)
 
                     SettingsView()
                         .tabItem { Label(String(localized: "tab.settings"), systemImage: "gearshape") }
-                        .tag(3)
+                        .tag(2)
                 }
                 .overlay { if showMeasuring { scaleMeasurementOverlay } }
                 .onChange(of: scale?.scaleState) { _, newState in
@@ -50,7 +46,7 @@ struct ContentView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                             withAnimation { showMeasuring = false }
                             measureComplete = false
-                            selectedTab = 2
+                            selectedTab = 1
                         }
                     case .idle, nil:
                         withAnimation { showMeasuring = false }
