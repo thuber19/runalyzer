@@ -10,11 +10,26 @@ struct DrinkLogSheet: View {
     @State private var customVolume: String = ""
     @State private var showCustomDrink = false
     @State private var loggedToast: String?
+    @State private var logDate = Date()
+
+    /// When opened for a specific past date (e.g. from Data tab)
+    var initialDate: Date?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    // Date picker
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundStyle(.gray)
+                        DatePicker("", selection: $logDate, in: ...Date(),
+                                   displayedComponents: [.date, .hourAndMinute])
+                            .labelsHidden()
+                    }
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.05)))
+
                     // Favorites
                     if !drinkTemplateStore.favorites.isEmpty {
                         VStack(alignment: .leading, spacing: 10) {
@@ -121,6 +136,9 @@ struct DrinkLogSheet: View {
             .sheet(isPresented: $showCustomDrink) {
                 CustomDrinkSheet()
             }
+            .onAppear {
+                if let initialDate { logDate = initialDate }
+            }
         }
     }
 
@@ -193,7 +211,7 @@ struct DrinkLogSheet: View {
     }
 
     private func logDrink(_ template: DrinkTemplate) {
-        fluidIntakeProvider.logDrink(template: template)
+        fluidIntakeProvider.logDrink(template: template, timestamp: logDate)
         withAnimation(.spring(response: 0.3)) {
             loggedToast = "\(template.name) logged"
         }

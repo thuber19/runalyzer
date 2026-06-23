@@ -21,6 +21,7 @@ struct DataTab: View {
     @EnvironmentObject var workoutStore: WorkoutStore
     @State private var filter: DataFilter = .all
     @State private var showDeleteAll = false
+    @State private var showDrinkLog = false
 
     private let cal = Calendar.current
 
@@ -172,12 +173,24 @@ struct DataTab: View {
             .background(Color.appBackground)
             .navigationTitle("Data")
             .toolbar {
+                if filter == .fluid {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showDrinkLog = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Delete All", role: .destructive) {
                         showDeleteAll = true
                     }
                     .foregroundColor(.red)
                 }
+            }
+            .sheet(isPresented: $showDrinkLog) {
+                DrinkLogSheet()
             }
             .alert("Delete all data?", isPresented: $showDeleteAll) {
                 Button("Delete All", role: .destructive) {

@@ -2,35 +2,53 @@ import SwiftUI
 import Combine
 import WatchKit
 
-/// Vertical list of round types — scrollable with Digital Crown even during Water Lock.
-/// Crown rotation highlights a type; after 2 seconds of no rotation, auto-selects it.
+/// Crown-scrollable round type picker. Hovering on a type for 2 seconds auto-confirms it.
+/// Works entirely without touching the screen (Water Lock compatible).
 struct RoundTypePickerView: View {
     let onSelect: (SaunaRoundType) -> Void
-    let showEndSession: Bool
     let onEndSession: (() -> Void)?
+    let restStartDate: Date?
 
-    init(showEndSession: Bool = false,
+    private let allTypes = SaunaRoundType.allCases
+    /// All items: round types + "End Session" sentinel
+    private var itemCount: Int { allTypes.count + 1 }
+
+    @State private var crownValue = 0.0
+    @State private var highlightedIndex = 0
+    @State private var confirmProgress: Double = 0
+    @State private var confirmTimer: Timer? = nil
+    @State private var restElapsed: TimeInterval = 0
+    private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    init(restStartDate: Date? = nil,
          onEndSession: (() -> Void)? = nil,
          onSelect: @escaping (SaunaRoundType) -> Void) {
-        self.showEndSession = showEndSession
+        self.restStartDate = restStartDate
         self.onEndSession = onEndSession
         self.onSelect = onSelect
     }
 
-    private let allTypes = SaunaRoundType.allCases
-    @State private var crownValue = 0.0
-    @State private var highlightedIndex: Int? = nil
-    @State private var confirmCountdown: Double = 0
-    @State private var confirmTimer: Timer? = nil
-
     var body: some View {
         VStack(spacing: 0) {
-            List {
-                ForEach(Array(allTypes.enumerated()), id: \.element.id) { index, roundType in
-                    let isHighlighted = highlightedIndex == index
-                    Button {
-                        onSelect(roundType)
-                    } label: {
+            // Rest timer
+            if restStartDate != nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "pause.circle")
+                        .foregroundStyle(.gray)
+                        .font(.caption2)
+                    Text("Rest \(formatDuration(restElapsed))")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 4)
+                .padding(.bottom, 2)
+            }
+
+            // Type list
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(Array(allTypes.enumerated()), id: \.element.id) { index, roundType in
+                        let isHighlighted = highlightedIndex == index
                         HStack(spacing: 10) {
                             Image(systemName: roundType.icon)
                                 .foregroundStyle(roundType.color)
@@ -40,20 +58,42 @@ struct RoundTypePickerView: View {
                                 .fontWeight(isHighlighted ? .bold : .regular)
                             Spacer()
                             if isHighlighted {
-                                CountdownRing(progress: confirmCountdown)
+                                CountdownRing(progress: confirmProgress)
                                     .frame(width: 20, height: 20)
                             }
                         }
+                        .id(index)
+                        .listRowBackground(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(roundType.color.opacity(isHighlighted ? 0.4 : 0.15))
+                        )
                     }
+
+                    // End Session item
+                    let isEndHighlighted = highlightedIndex == allTypes.count
+                    HStack(spacing: 10) {
+                        Image(systemName: "xmark.circle")
+                            .foregroundStyle(.red)
+                            .frame(width: 24)
+                        Text("End Session")
+                            .font(.body)
+                            .fontWeight(isEndHighlighted ? .bold : .regular)
+                            .foregroundStyle(.red)
+                        Spacer()
+                        if isEndHighlighted {
+                            CountdownRing(progress: confirmProgress)
+                                .frame(width: 20, height: 20)
+                        }
+                    }
+                    .id(allTypes.count)
                     .listRowBackground(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(roundType.color.opacity(isHighlighted ? 0.4 : 0.15))
+                            .fill(Color.red.opacity(isEndHighlighted ? 0.4 : 0.15))
                     )
                 }
-
-                if showEndSession {
-                    Button("End Session", role: .destructive) {
-                        onEndSession?()
+                .onChange(of: highlightedIndex) { _, newIndex in
+                    withAnimation {
+                        proxy.scrollTo(newIndex, anchor: .center)
                     }
                 }
             }
@@ -62,41 +102,61 @@ struct RoundTypePickerView: View {
         .digitalCrownRotation(
             $crownValue,
             from: 0,
-            through: Double(allTypes.count - 1),
+            through: Double(itemCount - 1),
             by: 1,
             sensitivity: .medium,
             isContinuous: false
         )
         .onChange(of: crownValue) { _, newValue in
-            let index = min(max(Int(newValue.rounded()), 0), allTypes.count - 1)
-            highlightedIndex = index
-            startConfirmCountdown(for: index)
+            let index = min(max(Int(newValue.rounded()), 0), itemCount - 1)
+            if index != highlightedIndex {
+                highlightedIndex = index
+                WKInterfaceDevice.current().play(.click)
+                startConfirmCountdown(for: index)
+            }
+        }
+        .onReceive(restTimer) { _ in
+            if let start = restStartDate {
+                restElapsed = Date().timeIntervalSince(start)
+            }
+        }
+        .onAppear {
+            highlightedIndex = 0
+            crownValue = 0
+            startConfirmCountdown(for: 0)
         }
         .navigationTitle("Next Round")
+        .navigationBarBackButtonHidden(true)
     }
 
     private func startConfirmCountdown(for index: Int) {
         confirmTimer?.invalidate()
-        confirmCountdown = 0
+        confirmProgress = 0
 
-        // Animate the countdown ring over 2 seconds
         let steps = 20
         let interval = 2.0 / Double(steps)
         var tick = 0
 
         confirmTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { timer in
             tick += 1
-            confirmCountdown = Double(tick) / Double(steps)
+            confirmProgress = Double(tick) / Double(steps)
 
             if tick >= steps {
                 timer.invalidate()
-                // Auto-select
-                if let idx = highlightedIndex, idx < allTypes.count {
-                    WKInterfaceDevice.current().play(.click)
-                    onSelect(allTypes[idx])
+                WKInterfaceDevice.current().play(.start)
+                if index < allTypes.count {
+                    onSelect(allTypes[index])
+                } else {
+                    onEndSession?()
                 }
             }
         }
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        return String(format: "%d:%02d", m, s)
     }
 }
 

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Post-session summary showing all rounds and totals.
+/// Post-session summary showing all rounds, rest periods, and totals.
 struct SessionSummaryView: View {
     let session: SaunaSession
     let onDone: () -> Void
@@ -32,8 +32,25 @@ struct SessionSummaryView: View {
 
                 Divider()
 
-                // Round list
+                // Round list with rest periods interleaved
+                let restPeriods = session.restPeriods
                 ForEach(Array(session.rounds.enumerated()), id: \.element.id) { index, round in
+                    // Rest period before this round (if any)
+                    if let rest = restPeriods.first(where: { $0.after == index - 1 }) {
+                        HStack {
+                            Image(systemName: "pause.circle")
+                                .foregroundStyle(.gray)
+                                .frame(width: 20)
+                            Text("Rest")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(formatDuration(rest.duration))
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+
                     HStack {
                         Image(systemName: round.type.icon)
                             .foregroundStyle(round.type.color)

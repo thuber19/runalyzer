@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 import WatchKit
 
-/// Shows a live timer for the current round with a stop button.
+/// Shows a live timer for the current round.
 /// Digital Crown rotation past threshold stops the round (Water Lock friendly).
 struct ActiveRoundView: View {
     let round: SaunaRound
@@ -16,7 +16,7 @@ struct ActiveRoundView: View {
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
             // Round type indicator
             HStack(spacing: 6) {
                 Image(systemName: round.type.icon)
@@ -27,7 +27,7 @@ struct ActiveRoundView: View {
 
             // Large timer
             Text(formatDuration(elapsed))
-                .font(.system(size: 44, weight: .medium, design: .monospaced))
+                .font(.system(size: 48, weight: .medium, design: .monospaced))
                 .foregroundStyle(round.type.color)
 
             // Heart rate
@@ -48,17 +48,13 @@ struct ActiveRoundView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            // Stop button
-            Button {
-                onStop()
-            } label: {
-                Image(systemName: "stop.fill")
-                    .font(.title2)
-            }
-            .buttonStyle(.bordered)
-            .tint(round.type.color)
+            Spacer()
 
-            // Crown hint
+            // Crown stop indicator
+            CrownStopIndicator(progress: crownValue)
+                .frame(height: 4)
+                .padding(.horizontal, 20)
+
             Text("Turn crown to stop")
                 .font(.system(size: 9))
                 .foregroundStyle(.tertiary)
@@ -77,6 +73,8 @@ struct ActiveRoundView: View {
         }
         .onAppear {
             elapsed = round.durationSec
+            crownValue = 0
+            didTriggerStop = false
         }
         .navigationBarBackButtonHidden(true)
     }
@@ -85,5 +83,23 @@ struct ActiveRoundView: View {
         let m = Int(seconds) / 60
         let s = Int(seconds) % 60
         return String(format: "%d:%02d", m, s)
+    }
+}
+
+/// Horizontal bar showing crown rotation progress toward stop threshold.
+private struct CrownStopIndicator: View {
+    let progress: Double
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.15))
+                Capsule()
+                    .fill(Color.white.opacity(0.6))
+                    .frame(width: geo.size.width * min(progress / 0.8, 1.0))
+                    .animation(.easeOut(duration: 0.15), value: progress)
+            }
+        }
     }
 }

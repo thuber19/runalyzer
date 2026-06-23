@@ -13,9 +13,16 @@ class WorkoutManager: NSObject, ObservableObject {
     private let logger = Logger(subsystem: "com.runalyzer.watch", category: "Workout")
 
     @Published var heartRate: Double?
+    @Published var authorizationDenied = false
     var isActive: Bool { session?.state == .running }
 
     func requestAuthorization() {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            logger.error("HealthKit not available on this device")
+            DispatchQueue.main.async { self.authorizationDenied = true }
+            return
+        }
+
         let typesToShare: Set<HKSampleType> = [HKObjectType.workoutType()]
         let typesToRead: Set<HKObjectType> = [
             HKObjectType.workoutType(),
@@ -24,6 +31,9 @@ class WorkoutManager: NSObject, ObservableObject {
         healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { [weak self] success, error in
             if let error {
                 self?.logger.error("HealthKit auth failed: \(error.localizedDescription)")
+            }
+            if !success {
+                DispatchQueue.main.async { self?.authorizationDenied = true }
             }
         }
     }

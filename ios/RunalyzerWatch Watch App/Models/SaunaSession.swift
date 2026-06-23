@@ -7,8 +7,29 @@ struct SaunaSession: Codable, Identifiable {
     var rounds: [SaunaRound]
     var synced: Bool
 
-    var totalDurationSec: TimeInterval {
+    var totalRoundDurationSec: TimeInterval {
         rounds.reduce(0) { $0 + $1.durationSec }
+    }
+
+    /// Rest periods between consecutive rounds (time from round N end to round N+1 start).
+    var restPeriods: [(duration: TimeInterval, after: Int)] {
+        var periods: [(TimeInterval, Int)] = []
+        for i in 1..<rounds.count {
+            let prevEnd = rounds[i - 1].endDate ?? rounds[i].startDate
+            let gap = rounds[i].startDate.timeIntervalSince(prevEnd)
+            if gap > 0 {
+                periods.append((gap, i - 1))
+            }
+        }
+        return periods
+    }
+
+    var totalRestDurationSec: TimeInterval {
+        restPeriods.reduce(0) { $0 + $1.duration }
+    }
+
+    var totalDurationSec: TimeInterval {
+        totalRoundDurationSec + totalRestDurationSec
     }
 
     var activeRound: SaunaRound? {

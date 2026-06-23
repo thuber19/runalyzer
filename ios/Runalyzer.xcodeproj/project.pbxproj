@@ -463,7 +463,9 @@
 				DEVELOPMENT_TEAM = R5L4UJJM3V;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = RunalyzerWatch;
+				INFOPLIST_KEY_CFBundleDisplayName = Runalyzer;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Runalyzer reads your heart rate during sauna sessions.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Runalyzer uses workout sessions to track your sauna activity.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = th.Runalyzer;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -497,7 +499,9 @@
 				DEVELOPMENT_TEAM = R5L4UJJM3V;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = RunalyzerWatch;
+				INFOPLIST_KEY_CFBundleDisplayName = Runalyzer;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "Runalyzer reads your heart rate during sauna sessions.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "Runalyzer uses workout sessions to track your sauna activity.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = th.Runalyzer;
 				LD_RUNPATH_SEARCH_PATHS = (

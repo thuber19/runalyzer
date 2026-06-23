@@ -8,6 +8,7 @@ struct SessionStartView: View {
 
     @State private var activeSession: SaunaSession?
     @State private var navigationPath = NavigationPath()
+    @State private var lastRoundEndDate: Date?
 
     enum Destination: Hashable {
         case pickRound
@@ -19,6 +20,19 @@ struct SessionStartView: View {
         NavigationStack(path: $navigationPath) {
             ScrollView {
                 VStack(spacing: 12) {
+                    // HealthKit auth warning
+                    if workoutManager.authorizationDenied {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.yellow)
+                            Text("Health access required. Open Settings → Health → Runalyzer.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.yellow.opacity(0.15)))
+                    }
+
                     // Start button
                     Button {
                         startSession()
@@ -64,7 +78,7 @@ struct SessionStartView: View {
                 switch dest {
                 case .pickRound:
                     RoundTypePickerView(
-                        showEndSession: activeSession?.rounds.isEmpty == false,
+                        restStartDate: lastRoundEndDate,
                         onEndSession: { endSession() }
                     ) { type in
                         startRound(type: type)
@@ -94,26 +108,33 @@ struct SessionStartView: View {
 
     private func startSession() {
         activeSession = SaunaSession()
+        lastRoundEndDate = nil
         workoutManager.start()
         navigationPath.append(Destination.pickRound)
     }
 
     private func startRound(type: SaunaRoundType) {
         activeSession?.startRound(type: type)
+        lastRoundEndDate = nil
         workoutManager.enableWaterLock()
+        // Replace picker with active round (don't stack)
+        navigationPath.removeLast()
         navigationPath.append(Destination.activeRound)
     }
 
     private func stopRound() {
         activeSession?.stopCurrentRound()
-        // Pop back to round picker
+        lastRoundEndDate = Date()
+        // Replace active round with picker
         navigationPath.removeLast()
+        navigationPath.append(Destination.pickRound)
     }
 
     private func endSession() {
         guard var session = activeSession else { return }
         session.stopCurrentRound()
         activeSession = session
+        lastRoundEndDate = nil
         // Clear navigation and go to summary
         navigationPath = NavigationPath()
         navigationPath.append(Destination.summary)
@@ -125,6 +146,7 @@ struct SessionStartView: View {
         syncManager.syncSession(session)
         workoutManager.stop()
         activeSession = nil
+        lastRoundEndDate = nil
         navigationPath = NavigationPath()
     }
 

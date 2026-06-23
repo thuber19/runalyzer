@@ -217,29 +217,55 @@ struct SleepDashboardView: View {
 
     // MARK: - Overnight Vitals
 
-    /// Wrist temperature deviation and respiratory rate from overnight readings.
+    /// Overnight vitals: wrist temp, respiratory rate, blood oxygen, HRV, resting HR.
     private func overnightVitalsCard(for night: SleepTrendView.SleepNight) -> some View {
         let nightStart = night.stages.map(\.start).min() ?? night.date
         let nightEnd = night.stages.map(\.end).max() ?? night.date
+        // Expand window slightly for metrics that may be recorded around wake time
+        let dayEnd = cal.date(byAdding: .hour, value: 2, to: nightEnd) ?? nightEnd
 
         let wristPoints = metricIndex.query(type: DataType.wristTemperature, measurementType: .metric,
                                              from: nightStart, to: nightEnd)
         let respPoints = metricIndex.query(type: DataType.respiratoryRate, measurementType: .metric,
                                             from: nightStart, to: nightEnd)
+        let spo2Points = metricIndex.query(type: DataType.bloodOxygen, measurementType: .metric,
+                                            from: nightStart, to: dayEnd)
+        let hrvPoints = metricIndex.query(type: DataType.hrvSDNN, measurementType: .metric,
+                                           from: nightStart, to: dayEnd)
+        let rhrPoints = metricIndex.query(type: DataType.restingHeartRate, measurementType: .metric,
+                                           from: nightStart, to: dayEnd)
 
         let wristVal = wristPoints.last?.value
         let respVal = respPoints.isEmpty ? nil : respPoints.map(\.value).reduce(0, +) / Double(respPoints.count)
+        let spo2Val = spo2Points.isEmpty ? nil : spo2Points.map(\.value).reduce(0, +) / Double(spo2Points.count)
+        let hrvVal = hrvPoints.isEmpty ? nil : hrvPoints.map(\.value).reduce(0, +) / Double(hrvPoints.count)
+        let rhrVal = rhrPoints.last?.value
 
-        let hasData = wristVal != nil || respVal != nil
+        let hasData = wristVal != nil || respVal != nil || spo2Val != nil || hrvVal != nil || rhrVal != nil
 
         return Group {
             if hasData {
-                HStack(spacing: 0) {
-                    if let w = wristVal {
-                        statCol(String(format: "%+.1f°C", w), "Wrist Temp", w > 0.5 ? .orange : (w < -0.5 ? .blue : .white))
+                VStack(spacing: 8) {
+                    HStack(spacing: 0) {
+                        if let r = respVal {
+                            statCol(String(format: "%.1f", r), "Resp. Rate")
+                        }
+                        if let w = wristVal {
+                            statCol(String(format: "%+.1f°C", w), "Wrist Temp", w > 0.5 ? .orange : (w < -0.5 ? .blue : .white))
+                        }
+                        if let spo2 = spo2Val {
+                            statCol(String(format: "%.0f%%", spo2), "SpO2", spo2 < 95 ? .orange : .white)
+                        }
                     }
-                    if let r = respVal {
-                        statCol(String(format: "%.1f", r), "Resp. Rate")
+                    if hrvVal != nil || rhrVal != nil {
+                        HStack(spacing: 0) {
+                            if let hrv = hrvVal {
+                                statCol(String(format: "%.0f ms", hrv), "HRV")
+                            }
+                            if let rhr = rhrVal {
+                                statCol(String(format: "%.0f bpm", rhr), "Resting HR")
+                            }
+                        }
                     }
                 }
                 .padding()
@@ -253,10 +279,14 @@ struct SleepDashboardView: View {
     private func periodVitalsCard(nights: ArraySlice<SleepTrendView.SleepNight>) -> some View {
         var wristValues: [Double] = []
         var respValues: [Double] = []
+        var spo2Values: [Double] = []
+        var hrvValues: [Double] = []
+        var rhrValues: [Double] = []
 
         for night in nights {
             let nightStart = night.stages.map(\.start).min() ?? night.date
             let nightEnd = night.stages.map(\.end).max() ?? night.date
+            let dayEnd = cal.date(byAdding: .hour, value: 2, to: nightEnd) ?? nightEnd
 
             let wristPoints = metricIndex.query(type: DataType.wristTemperature, measurementType: .metric,
                                                  from: nightStart, to: nightEnd)
@@ -267,20 +297,55 @@ struct SleepDashboardView: View {
             if !respPoints.isEmpty {
                 respValues.append(respPoints.map(\.value).reduce(0, +) / Double(respPoints.count))
             }
+
+            let spo2Points = metricIndex.query(type: DataType.bloodOxygen, measurementType: .metric,
+                                                from: nightStart, to: dayEnd)
+            if !spo2Points.isEmpty {
+                spo2Values.append(spo2Points.map(\.value).reduce(0, +) / Double(spo2Points.count))
+            }
+
+            let hrvPoints = metricIndex.query(type: DataType.hrvSDNN, measurementType: .metric,
+                                               from: nightStart, to: dayEnd)
+            if !hrvPoints.isEmpty {
+                hrvValues.append(hrvPoints.map(\.value).reduce(0, +) / Double(hrvPoints.count))
+            }
+
+            let rhrPoints = metricIndex.query(type: DataType.restingHeartRate, measurementType: .metric,
+                                               from: nightStart, to: dayEnd)
+            if let last = rhrPoints.last { rhrValues.append(last.value) }
         }
 
-        let hasData = !wristValues.isEmpty || !respValues.isEmpty
+        let hasData = !wristValues.isEmpty || !respValues.isEmpty || !spo2Values.isEmpty
+            || !hrvValues.isEmpty || !rhrValues.isEmpty
 
         return Group {
             if hasData {
-                HStack(spacing: 0) {
-                    if !wristValues.isEmpty {
-                        let avg = wristValues.reduce(0, +) / Double(wristValues.count)
-                        statCol(String(format: "%+.1f°C", avg), "Wrist Temp")
+                VStack(spacing: 8) {
+                    HStack(spacing: 0) {
+                        if !respValues.isEmpty {
+                            let avg = respValues.reduce(0, +) / Double(respValues.count)
+                            statCol(String(format: "%.1f br/min", avg), "Resp. Rate")
+                        }
+                        if !wristValues.isEmpty {
+                            let avg = wristValues.reduce(0, +) / Double(wristValues.count)
+                            statCol(String(format: "%+.1f°C", avg), "Wrist Temp")
+                        }
+                        if !spo2Values.isEmpty {
+                            let avg = spo2Values.reduce(0, +) / Double(spo2Values.count)
+                            statCol(String(format: "%.0f%%", avg), "SpO2")
+                        }
                     }
-                    if !respValues.isEmpty {
-                        let avg = respValues.reduce(0, +) / Double(respValues.count)
-                        statCol(String(format: "%.1f br/min", avg), "Resp. Rate")
+                    if !hrvValues.isEmpty || !rhrValues.isEmpty {
+                        HStack(spacing: 0) {
+                            if !hrvValues.isEmpty {
+                                let avg = hrvValues.reduce(0, +) / Double(hrvValues.count)
+                                statCol(String(format: "%.0f ms", avg), "HRV")
+                            }
+                            if !rhrValues.isEmpty {
+                                let avg = rhrValues.reduce(0, +) / Double(rhrValues.count)
+                                statCol(String(format: "%.0f bpm", avg), "Resting HR")
+                            }
+                        }
                     }
                 }
                 .padding()

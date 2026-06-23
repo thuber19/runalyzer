@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 
 /// Body composition dashboard with latest readings and trends.
 struct BodyCompDashboardView: View {
@@ -184,27 +183,10 @@ struct BodyCompDashboardView: View {
             if periodReadings.count > 1 {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("WEIGHT").font(.caption2).foregroundColor(.gray)
-                    Chart {
-                        ForEach(periodReadings, id: \.date) { r in
-                            LineMark(x: .value("Date", r.date), y: .value("kg", r.weight))
-                                .foregroundStyle(.cyan)
-                            PointMark(x: .value("Date", r.date), y: .value("kg", r.weight))
-                                .foregroundStyle(.cyan)
-                                .symbolSize(20)
-                        }
-                    }
-                    .chartYAxis {
-                        AxisMarks(position: .leading) { _ in
-                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
-                                .foregroundStyle(Color.gray.opacity(0.3))
-                            AxisValueLabel().foregroundStyle(.gray)
-                        }
-                    }
-                    .chartXAxis {
-                        AxisMarks { _ in
-                            AxisValueLabel().foregroundStyle(.gray)
-                        }
-                    }
+                    ScrubbingLineChart(
+                        data: periodReadings.map { ChartDataPoint(date: $0.date, avg: $0.weight) },
+                        color: .cyan, unit: "kg", showBand: false
+                    )
                     .frame(height: 160)
                 }
                 .padding()
@@ -217,27 +199,10 @@ struct BodyCompDashboardView: View {
             if fatReadings.count > 1 {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("BODY FAT %").font(.caption2).foregroundColor(.gray)
-                    Chart {
-                        ForEach(fatReadings, id: \.date) { r in
-                            LineMark(x: .value("Date", r.date), y: .value("%", r.bodyFatPct!))
-                                .foregroundStyle(.orange)
-                            PointMark(x: .value("Date", r.date), y: .value("%", r.bodyFatPct!))
-                                .foregroundStyle(.orange)
-                                .symbolSize(20)
-                        }
-                    }
-                    .chartYAxis {
-                        AxisMarks(position: .leading) { _ in
-                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
-                                .foregroundStyle(Color.gray.opacity(0.3))
-                            AxisValueLabel().foregroundStyle(.gray)
-                        }
-                    }
-                    .chartXAxis {
-                        AxisMarks { _ in
-                            AxisValueLabel().foregroundStyle(.gray)
-                        }
-                    }
+                    ScrubbingLineChart(
+                        data: fatReadings.map { ChartDataPoint(date: $0.date, avg: $0.bodyFatPct!) },
+                        color: .orange, unit: "%", showBand: false
+                    )
                     .frame(height: 160)
                 }
                 .padding()
@@ -250,27 +215,10 @@ struct BodyCompDashboardView: View {
             if muscleReadings.count > 1 {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("MUSCLE MASS").font(.caption2).foregroundColor(.gray)
-                    Chart {
-                        ForEach(muscleReadings, id: \.date) { r in
-                            LineMark(x: .value("Date", r.date), y: .value("kg", r.muscleMassKg!))
-                                .foregroundStyle(.green)
-                            PointMark(x: .value("Date", r.date), y: .value("kg", r.muscleMassKg!))
-                                .foregroundStyle(.green)
-                                .symbolSize(20)
-                        }
-                    }
-                    .chartYAxis {
-                        AxisMarks(position: .leading) { _ in
-                            AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
-                                .foregroundStyle(Color.gray.opacity(0.3))
-                            AxisValueLabel().foregroundStyle(.gray)
-                        }
-                    }
-                    .chartXAxis {
-                        AxisMarks { _ in
-                            AxisValueLabel().foregroundStyle(.gray)
-                        }
-                    }
+                    ScrubbingLineChart(
+                        data: muscleReadings.map { ChartDataPoint(date: $0.date, avg: $0.muscleMassKg!) },
+                        color: .green, unit: "kg", showBand: false
+                    )
                     .frame(height: 160)
                 }
                 .padding()
