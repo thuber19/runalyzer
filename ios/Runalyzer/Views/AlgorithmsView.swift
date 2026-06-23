@@ -142,14 +142,16 @@ struct AlgorithmsView: View {
                     name: "Nightly Sleep Score",
                     id: "sleep_score_v1",
                     inputs: "Sleep stages (Deep, Core, REM, Awake) with timestamps, recent bedtimes",
-                    output: "Score 0–100 with Duration (50pts), Consistency (30pts), Interruptions (20pts) breakdown",
+                    output: "Score 0–100 with Duration (40pts), Quality (10pts), Consistency (30pts), Interruptions (20pts) breakdown",
                     method: """
                     Modeled after Apple's watchOS sleep score methodology.
 
-                    Duration (50 points):
+                    Duration (40 points):
                       Target: 7h 50m of sleep. Non-linear penalty for undersleeping: \
-                      first hour costs ~6pts, second hour costs ~13pts. \
-                      Quality penalties: -5pts if deep sleep < 10%, -5pts if REM < 15%.
+                      first hour costs ~5pts, second hour costs ~11pts.
+
+                    Quality (10 points):
+                      Sleep stage proportions: -5pts if deep sleep < 10%, -5pts if REM < 15%.
 
                     Consistency (30 points):
                       Compares tonight's bedtime to your rolling average. \

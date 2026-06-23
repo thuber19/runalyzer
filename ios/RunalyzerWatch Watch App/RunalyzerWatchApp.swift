@@ -12,6 +12,9 @@ struct RunalyzerWatchApp: App {
                 .environmentObject(sessionStore)
                 .environmentObject(workoutManager)
                 .environmentObject(syncManager)
+                .onAppear {
+                    workoutManager.requestAuthorization()
+                }
         }
     }
 }

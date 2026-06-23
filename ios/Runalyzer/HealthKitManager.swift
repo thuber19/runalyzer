@@ -681,7 +681,7 @@ class HealthKitManager: ObservableObject {
         ) { _, results, error in
             if let error { AppLogger.health.error("Workouts query: \(error.localizedDescription)") }
             let workouts = results as? [HKWorkout] ?? []
-            AppLogger.health.info("Fetched \(workouts.count) workouts from HealthKit")
+            AppLogger.health.debug("HealthKit returned \(workouts.count) workouts in lookback window")
             guard !workouts.isEmpty else { completion([]); return }
 
             // Build details from workout statistics (no per-workout HR query — too slow for bulk import)

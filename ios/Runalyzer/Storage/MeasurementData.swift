@@ -377,7 +377,8 @@ enum DataType {
 
     // Sleep score (sleep_v1) — nightly score from sleep stages
     static let sleepScore                = "sleep_score"                  // 0–100 overall
-    static let sleepDurationComponent    = "sleep_duration_component"    // 0–50
+    static let sleepDurationComponent    = "sleep_duration_component"    // 0–40
+    static let sleepQualityComponent     = "sleep_quality_component"     // 0–10
     static let sleepConsistencyComponent = "sleep_consistency_component" // 0–30
     static let sleepInterruptionComponent = "sleep_interruption_component" // 0–20
 

@@ -62,7 +62,7 @@ final class SleepScoreTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(result.total, 85)
         XCTAssertEqual(result.label, "Excellent")
-        XCTAssertEqual(result.durationScore + result.consistencyScore + result.interruptionScore, result.total)
+        XCTAssertEqual(result.durationScore + result.qualityScore + result.consistencyScore + result.interruptionScore, result.total)
     }
 
     func testShortSleep() {
@@ -136,9 +136,11 @@ final class SleepScoreTests: XCTestCase {
         )
         let result = SleepScore.compute(input)
 
-        XCTAssertEqual(result.total, result.durationScore + result.consistencyScore + result.interruptionScore)
+        XCTAssertEqual(result.total, result.durationScore + result.qualityScore + result.consistencyScore + result.interruptionScore)
         XCTAssertGreaterThanOrEqual(result.durationScore, 0)
-        XCTAssertLessThanOrEqual(result.durationScore, 50)
+        XCTAssertLessThanOrEqual(result.durationScore, 40)
+        XCTAssertGreaterThanOrEqual(result.qualityScore, 0)
+        XCTAssertLessThanOrEqual(result.qualityScore, 10)
         XCTAssertGreaterThanOrEqual(result.consistencyScore, 0)
         XCTAssertLessThanOrEqual(result.consistencyScore, 30)
         XCTAssertGreaterThanOrEqual(result.interruptionScore, 0)

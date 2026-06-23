@@ -35,8 +35,9 @@ struct SleepNightDetailView: View {
                         scoreRing(score.total, color: scoreColor, size: 64)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(score.label).font(.headline).foregroundColor(scoreColor)
-                            HStack(spacing: 12) {
-                                miniStat("Duration", score.durationScore, 50)
+                            HStack(spacing: 8) {
+                                miniStat("Duration", score.durationScore, 40)
+                                miniStat("Quality", score.qualityScore, 10)
                                 miniStat("Consistency", score.consistencyScore, 30)
                                 miniStat("Interruptions", score.interruptionScore, 20)
                             }

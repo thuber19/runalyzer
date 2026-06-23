@@ -2,9 +2,9 @@ import Foundation
 
 /// Nightly sleep score (0–100) modeled after Apple's watchOS sleep score.
 ///
-/// Three components:
-/// - **Duration** (50 pts): targets ~7h50m of sleep, penalties for undersleeping,
-///   quality bonuses/penalties for deep and REM stage proportions
+/// Four components:
+/// - **Duration** (40 pts): targets ~7h50m of sleep, penalties for undersleeping
+/// - **Quality** (10 pts): deep and REM stage proportions
 /// - **Consistency** (30 pts): how close your bedtime is to your recent average
 /// - **Interruptions** (20 pts): time awake and number of wake events during the night
 ///
@@ -34,7 +34,8 @@ enum SleepScore {
     /// Breakdown of the score.
     struct Result {
         let total: Int                 // 0–100
-        let durationScore: Int         // 0–50
+        let durationScore: Int         // 0–40
+        let qualityScore: Int          // 0–10
         let consistencyScore: Int      // 0–30
         let interruptionScore: Int     // 0–20
         let label: String              // "Excellent", "Good", "Fair", "Poor"
@@ -47,39 +48,48 @@ enum SleepScore {
 
     static func compute(_ input: NightInput) -> Result {
         let dur = durationComponent(input)
+        let qual = qualityComponent(input)
         let con = consistencyComponent(input)
         let intr = interruptionComponent(input)
-        let total = dur + con + intr
+        let total = dur + qual + con + intr
 
         return Result(
             total: total,
             durationScore: dur,
+            qualityScore: qual,
             consistencyScore: con,
             interruptionScore: intr,
             label: label(for: total)
         )
     }
 
-    // MARK: - Duration (50 points)
+    // MARK: - Duration (40 points)
 
-    /// Base: how close to target sleep duration.
-    /// Quality: penalties for low deep or REM sleep.
+    /// Pure time: how close to target sleep duration.
     private static func durationComponent(_ input: NightInput) -> Int {
-        var score: Double = 50
+        var score: Double = 40
 
         // Undersleep penalty (non-linear — losing more hours costs more)
         let deficit = max(0, targetSleepMinutes - input.asleepMinutes)
         if deficit > 0 {
-            // First 60 min deficit: ~6 pts lost
-            // Next 60 min: ~13 pts lost (accelerating)
-            // Roughly: penalty = 6 * (deficit/60)^1.5
+            // First 60 min deficit: ~5 pts lost
+            // Next 60 min: ~11 pts lost (accelerating)
+            // Roughly: penalty = 5 * (deficit/60)^1.5
             let deficitHours = deficit / 60
-            let penalty = min(45.0, 6.0 * pow(deficitHours, 1.5))
+            let penalty = min(35.0, 5.0 * pow(deficitHours, 1.5))
             score -= penalty
         }
         // No penalty for oversleeping
 
-        // Quality penalties for low stage proportions
+        return max(0, min(40, Int(score.rounded())))
+    }
+
+    // MARK: - Quality (10 points)
+
+    /// Sleep stage proportions: deep and REM sleep.
+    private static func qualityComponent(_ input: NightInput) -> Int {
+        var score: Double = 10
+
         let totalSleep = input.asleepMinutes
         if totalSleep > 0 {
             let deepPct = input.deepMinutes / totalSleep
@@ -96,7 +106,7 @@ enum SleepScore {
             }
         }
 
-        return max(0, min(50, Int(score.rounded())))
+        return max(0, min(10, Int(score.rounded())))
     }
 
     // MARK: - Consistency (30 points)

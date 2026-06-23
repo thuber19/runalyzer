@@ -68,6 +68,8 @@ struct SleepDashboardView: View {
         guard let total = points.last else { return nil }
         let dur = metricIndex.query(type: DataType.sleepDurationComponent, measurementType: .derived,
                                      from: dayStart, to: dayEnd).last?.value ?? 0
+        let qual = metricIndex.query(type: DataType.sleepQualityComponent, measurementType: .derived,
+                                      from: dayStart, to: dayEnd).last?.value ?? 0
         let con = metricIndex.query(type: DataType.sleepConsistencyComponent, measurementType: .derived,
                                      from: dayStart, to: dayEnd).last?.value ?? 0
         let intr = metricIndex.query(type: DataType.sleepInterruptionComponent, measurementType: .derived,
@@ -75,6 +77,7 @@ struct SleepDashboardView: View {
         return SleepScore.Result(
             total: Int(total.value.rounded()),
             durationScore: Int(dur.rounded()),
+            qualityScore: Int(qual.rounded()),
             consistencyScore: Int(con.rounded()),
             interruptionScore: Int(intr.rounded()),
             label: SleepScore.label(for: Int(total.value.rounded()))
@@ -124,8 +127,9 @@ struct SleepDashboardView: View {
                     scoreRing(score.total, color: scoreColor, size: 64)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(score.label).font(.headline).foregroundColor(scoreColor)
-                        HStack(spacing: 12) {
-                            miniStat("Duration", score.durationScore, 50)
+                        HStack(spacing: 8) {
+                            miniStat("Duration", score.durationScore, 40)
+                            miniStat("Quality", score.qualityScore, 10)
                             miniStat("Consistency", score.consistencyScore, 30)
                             miniStat("Interruptions", score.interruptionScore, 20)
                         }
@@ -191,7 +195,7 @@ struct SleepDashboardView: View {
         if night.asleep < 420 {
             insights.append(("moon.zzz", "Only \(formatMin(night.asleep)) of sleep — aim for 7–9 hours.", .orange))
         }
-        if night.asleep > 0 && night.deep / night.asleep < 0.10 {
+        if score.qualityScore < 8 {
             insights.append(("arrow.down", "Low deep sleep (\(String(format: "%.0f%%", night.deep / night.asleep * 100))). Exercise and a cool room help.", .orange))
         }
         if score.consistencyScore < 20 {

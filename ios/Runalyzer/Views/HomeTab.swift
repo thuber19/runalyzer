@@ -26,15 +26,22 @@ struct HomeTab: View {
                         eveningCheckInBanner
                     }
 
-                    recoveryTile
+                    // Today
+                    Text("TODAY").font(.caption2.bold()).foregroundColor(.gray)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                    recoveryActivitiesTile
+                    HStack(spacing: 12) { recoveryTile; sleepTile }
 
-                    HStack(spacing: 12) { heartTile; sleepTile }
+                    HStack(spacing: 12) { habitsTile; hydrationTile }
 
-                    HStack(spacing: 12) { activityTile; habitsTile }
+                    // Trends
+                    Text("TRENDS").font(.caption2.bold()).foregroundColor(.gray)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
 
-                    HStack(spacing: 12) { hydrationTile; bodyCompTile }
+                    HStack(spacing: 12) { heartTile; activityTile }
+
+                    HStack(spacing: 12) { recoveryActivitiesTile; bodyCompTile }
 
                     HStack(spacing: 12) { workoutsTile; labResultsTile }
                 }

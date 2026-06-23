@@ -15,6 +15,19 @@ class WorkoutManager: NSObject, ObservableObject {
     @Published var heartRate: Double?
     var isActive: Bool { session?.state == .running }
 
+    func requestAuthorization() {
+        let typesToShare: Set<HKSampleType> = [HKObjectType.workoutType()]
+        let typesToRead: Set<HKObjectType> = [
+            HKObjectType.workoutType(),
+            HKQuantityType.quantityType(forIdentifier: .heartRate)!
+        ]
+        healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { [weak self] success, error in
+            if let error {
+                self?.logger.error("HealthKit auth failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     func start() {
         heartRate = nil
         let config = HKWorkoutConfiguration()
@@ -37,7 +50,7 @@ class WorkoutManager: NSObject, ObservableObject {
                 }
             }
 
-            enableWaterLock()
+            // Water Lock is enabled after session reaches .running state (see delegate)
             logger.info("Workout session started for sauna tracking")
         } catch {
             logger.error("Failed to create workout session: \(error.localizedDescription)")
@@ -76,6 +89,11 @@ extension WorkoutManager: HKWorkoutSessionDelegate {
                         from fromState: HKWorkoutSessionState,
                         date: Date) {
         logger.info("Workout state: \(fromState.rawValue) → \(toState.rawValue)")
+        if toState == .running {
+            DispatchQueue.main.async { [weak self] in
+                self?.enableWaterLock()
+            }
+        }
     }
 
     func workoutSession(_ workoutSession: HKWorkoutSession,
