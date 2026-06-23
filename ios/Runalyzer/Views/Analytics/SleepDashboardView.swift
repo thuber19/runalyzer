@@ -113,7 +113,7 @@ struct SleepDashboardView: View {
 
         // Average bedtime from last 30 nights
         let recentBedtimes = nights.suffix(30).compactMap { bedtime(for: $0) }
-        let avgBedtimeStr = averageBedtimeString(recentBedtimes)
+        _ = averageBedtimeString(recentBedtimes)
 
         let scoreColor = sleepScoreColor(score.total)
 

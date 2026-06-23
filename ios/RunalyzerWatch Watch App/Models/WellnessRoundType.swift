@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Round types for sauna sessions. Raw values match the DataPoint `unit` strings on the iOS side.
-enum SaunaRoundType: String, Codable, CaseIterable, Identifiable, Sendable {
+/// Round types for wellness sessions. Raw values match the DataPoint `unit` strings on the iOS side.
+enum WellnessRoundType: String, Codable, CaseIterable, Identifiable, Sendable {
     case finnish
     case bioMild = "bio_mild"
     case steam

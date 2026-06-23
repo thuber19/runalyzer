@@ -3,7 +3,7 @@ import Combine
 import WatchConnectivity
 import os
 
-/// Watch-side WatchConnectivity manager. Sends completed sauna sessions
+/// Watch-side WatchConnectivity manager. Sends completed wellness sessions
 /// to the iOS app via `transferUserInfo` (reliable, queued delivery).
 class WatchSyncManager: NSObject, ObservableObject {
     private let logger = Logger(subsystem: "com.runalyzer.watch", category: "Sync")
@@ -16,7 +16,7 @@ class WatchSyncManager: NSObject, ObservableObject {
     }
 
     /// Queue a completed session for transfer to the iOS app.
-    func syncSession(_ session: SaunaSession) {
+    func syncSession(_ session: WellnessSession) {
         guard WCSession.default.activationState == .activated else {
             logger.warning("WCSession not activated, session will sync later")
             return
@@ -24,7 +24,7 @@ class WatchSyncManager: NSObject, ObservableObject {
 
         let payload = encodeSession(session)
         WCSession.default.transferUserInfo(payload)
-        logger.info("Queued sauna session \(session.id) for transfer")
+        logger.info("Queued wellness session \(session.id) for transfer")
     }
 
     /// Retry syncing all unsynced sessions (called on activation or app foreground).
@@ -36,7 +36,7 @@ class WatchSyncManager: NSObject, ObservableObject {
 
     // MARK: - Encoding
 
-    private func encodeSession(_ session: SaunaSession) -> [String: Any] {
+    private func encodeSession(_ session: WellnessSession) -> [String: Any] {
         let rounds: [[String: Any]] = session.rounds.compactMap { round in
             guard let endDate = round.endDate else { return nil }
             return [
@@ -48,7 +48,7 @@ class WatchSyncManager: NSObject, ObservableObject {
         }
 
         return [
-            "type": "sauna_session",
+            "type": "wellness_session",
             "version": 1,
             "session": [
                 "id": session.id.uuidString,

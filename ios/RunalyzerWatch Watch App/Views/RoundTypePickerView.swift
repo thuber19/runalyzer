@@ -2,117 +2,115 @@ import SwiftUI
 import Combine
 import WatchKit
 
-/// Crown-scrollable round type picker. Hovering on a type for 2 seconds auto-confirms it.
-/// Works entirely without touching the screen (Water Lock compatible).
+/// Crown-driven round type picker. Single static view — crown changes which item is shown.
+/// Hovering on a type for 2 seconds auto-confirms it.
+/// No ScrollView, no TabView, no List — just a single VStack that swaps content.
 struct RoundTypePickerView: View {
-    let onSelect: (SaunaRoundType) -> Void
+    let onSelect: (WellnessRoundType) -> Void
     let onEndSession: (() -> Void)?
     let restStartDate: Date?
 
-    private let allTypes = SaunaRoundType.allCases
-    /// All items: round types + "End Session" sentinel
-    private var itemCount: Int { allTypes.count + 1 }
+    private let allTypes = WellnessRoundType.allCases
+    /// Index 0 = rest/landing, 1..N = round types, N+1 = end session
+    private var maxIndex: Int { allTypes.count + 1 }
 
     @State private var crownValue = 0.0
-    @State private var highlightedIndex = 0
+    @State private var selectedIndex = 0
     @State private var confirmProgress: Double = 0
     @State private var confirmTimer: Timer? = nil
     @State private var restElapsed: TimeInterval = 0
+    @State private var dismissed = false
     private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     init(restStartDate: Date? = nil,
          onEndSession: (() -> Void)? = nil,
-         onSelect: @escaping (SaunaRoundType) -> Void) {
+         onSelect: @escaping (WellnessRoundType) -> Void) {
         self.restStartDate = restStartDate
         self.onEndSession = onEndSession
         self.onSelect = onSelect
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Rest timer
-            if restStartDate != nil {
-                HStack(spacing: 4) {
-                    Image(systemName: "pause.circle")
-                        .foregroundStyle(.gray)
-                        .font(.caption2)
-                    Text("Rest \(formatDuration(restElapsed))")
-                        .font(.system(.caption2, design: .monospaced))
+        VStack(spacing: 8) {
+            Spacer()
+
+            if selectedIndex == 0 {
+                // Rest / landing page
+                Image(systemName: "pause.circle.fill")
+                    .font(.system(size: 36))
+                    .foregroundStyle(.gray)
+                if restStartDate != nil {
+                    Text("Rest")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Text(formatDuration(restElapsed))
+                        .font(.system(.title2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Select Round")
+                        .font(.headline)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.top, 4)
-                .padding(.bottom, 2)
+                Text("Scroll to choose")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 4)
+            } else if selectedIndex <= allTypes.count {
+                // Round type
+                let roundType = allTypes[selectedIndex - 1]
+                Image(systemName: roundType.icon)
+                    .font(.system(size: 44))
+                    .foregroundStyle(roundType.color)
+                Text(roundType.label)
+                    .font(.title3.bold())
+                CountdownBar(progress: confirmProgress, color: roundType.color)
+                    .frame(height: 4)
+                    .padding(.horizontal, 30)
+            } else {
+                // End Session
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.red)
+                Text("End Session")
+                    .font(.title3.bold())
+                    .foregroundStyle(.red)
+                CountdownBar(progress: confirmProgress, color: .red)
+                    .frame(height: 4)
+                    .padding(.horizontal, 30)
             }
 
-            // Type list
-            ScrollViewReader { proxy in
-                List {
-                    ForEach(Array(allTypes.enumerated()), id: \.element.id) { index, roundType in
-                        let isHighlighted = highlightedIndex == index
-                        HStack(spacing: 10) {
-                            Image(systemName: roundType.icon)
-                                .foregroundStyle(roundType.color)
-                                .frame(width: 24)
-                            Text(roundType.label)
-                                .font(.body)
-                                .fontWeight(isHighlighted ? .bold : .regular)
-                            Spacer()
-                            if isHighlighted {
-                                CountdownRing(progress: confirmProgress)
-                                    .frame(width: 20, height: 20)
-                            }
-                        }
-                        .id(index)
-                        .listRowBackground(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(roundType.color.opacity(isHighlighted ? 0.4 : 0.15))
-                        )
-                    }
+            Spacer()
 
-                    // End Session item
-                    let isEndHighlighted = highlightedIndex == allTypes.count
-                    HStack(spacing: 10) {
-                        Image(systemName: "xmark.circle")
-                            .foregroundStyle(.red)
-                            .frame(width: 24)
-                        Text("End Session")
-                            .font(.body)
-                            .fontWeight(isEndHighlighted ? .bold : .regular)
-                            .foregroundStyle(.red)
-                        Spacer()
-                        if isEndHighlighted {
-                            CountdownRing(progress: confirmProgress)
-                                .frame(width: 20, height: 20)
-                        }
-                    }
-                    .id(allTypes.count)
-                    .listRowBackground(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.red.opacity(isEndHighlighted ? 0.4 : 0.15))
-                    )
-                }
-                .onChange(of: highlightedIndex) { _, newIndex in
-                    withAnimation {
-                        proxy.scrollTo(newIndex, anchor: .center)
-                    }
+            // Position dots
+            HStack(spacing: 4) {
+                ForEach(0...maxIndex, id: \.self) { i in
+                    Circle()
+                        .fill(i == selectedIndex ? Color.white : Color.white.opacity(0.3))
+                        .frame(width: 5, height: 5)
                 }
             }
+            .padding(.bottom, 4)
         }
         .focusable()
         .digitalCrownRotation(
             $crownValue,
             from: 0,
-            through: Double(itemCount - 1),
+            through: Double(maxIndex),
             by: 1,
             sensitivity: .medium,
             isContinuous: false
         )
         .onChange(of: crownValue) { _, newValue in
-            let index = min(max(Int(newValue.rounded()), 0), itemCount - 1)
-            if index != highlightedIndex {
-                highlightedIndex = index
+            guard !dismissed else { return }
+            let index = min(max(Int(newValue.rounded()), 0), maxIndex)
+            if index != selectedIndex {
+                selectedIndex = index
                 WKInterfaceDevice.current().play(.click)
-                startConfirmCountdown(for: index)
+                if index == 0 {
+                    cancelConfirmCountdown()
+                } else {
+                    startConfirmCountdown(for: index)
+                }
             }
         }
         .onReceive(restTimer) { _ in
@@ -121,11 +119,14 @@ struct RoundTypePickerView: View {
             }
         }
         .onAppear {
-            highlightedIndex = 0
+            selectedIndex = 0
             crownValue = 0
-            startConfirmCountdown(for: 0)
+            confirmProgress = 0
+            dismissed = false
         }
-        .navigationTitle("Next Round")
+        .onDisappear {
+            confirmTimer?.invalidate()
+        }
         .navigationBarBackButtonHidden(true)
     }
 
@@ -143,14 +144,23 @@ struct RoundTypePickerView: View {
 
             if tick >= steps {
                 timer.invalidate()
+                guard !dismissed else { return }
+                dismissed = true
                 WKInterfaceDevice.current().play(.start)
-                if index < allTypes.count {
-                    onSelect(allTypes[index])
+
+                let typeIndex = index - 1
+                if typeIndex >= 0 && typeIndex < allTypes.count {
+                    onSelect(allTypes[typeIndex])
                 } else {
                     onEndSession?()
                 }
             }
         }
+    }
+
+    private func cancelConfirmCountdown() {
+        confirmTimer?.invalidate()
+        confirmProgress = 0
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -160,15 +170,21 @@ struct RoundTypePickerView: View {
     }
 }
 
-/// Small circular countdown indicator.
-private struct CountdownRing: View {
+/// Horizontal bar showing countdown progress.
+private struct CountdownBar: View {
     let progress: Double
+    let color: Color
 
     var body: some View {
-        Circle()
-            .trim(from: 0, to: progress)
-            .stroke(Color.white, lineWidth: 2)
-            .rotationEffect(.degrees(-90))
-            .animation(.linear(duration: 0.1), value: progress)
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(color.opacity(0.2))
+                Capsule()
+                    .fill(color)
+                    .frame(width: geo.size.width * min(max(progress, 0), 1.0))
+                    .animation(.linear(duration: 0.1), value: progress)
+            }
+        }
     }
 }

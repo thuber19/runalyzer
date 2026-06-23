@@ -4,16 +4,23 @@ import WatchKit
 
 /// Shows a live timer for the current round.
 /// Digital Crown rotation past threshold stops the round (Water Lock friendly).
+/// Crown progress decays back to zero when the user stops turning.
 struct ActiveRoundView: View {
-    let round: SaunaRound
+    let round: WellnessRound
     let roundNumber: Int
     let onStop: () -> Void
 
     @EnvironmentObject var workoutManager: WorkoutManager
     @State private var elapsed: TimeInterval = 0
     @State private var crownValue = 0.0
+    @State private var displayProgress = 0.0
     @State private var didTriggerStop = false
+    @State private var decayTimer: Timer?
+    @State private var lastCrownChange = Date()
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    /// Crown must reach this value to trigger stop
+    private let stopThreshold = 1.5
 
     var body: some View {
         VStack(spacing: 6) {
@@ -51,7 +58,7 @@ struct ActiveRoundView: View {
             Spacer()
 
             // Crown stop indicator
-            CrownStopIndicator(progress: crownValue)
+            CrownStopIndicator(progress: displayProgress / stopThreshold)
                 .frame(height: 4)
                 .padding(.horizontal, 20)
 
@@ -60,10 +67,15 @@ struct ActiveRoundView: View {
                 .foregroundStyle(.tertiary)
         }
         .focusable()
-        .digitalCrownRotation($crownValue, from: 0, through: 1.0, sensitivity: .low)
+        .digitalCrownRotation($crownValue, from: 0, through: stopThreshold, sensitivity: .low)
         .onChange(of: crownValue) { _, newValue in
-            if newValue >= 0.8 && !didTriggerStop {
+            lastCrownChange = Date()
+            displayProgress = newValue
+            scheduleDecay()
+
+            if newValue >= stopThreshold && !didTriggerStop {
                 didTriggerStop = true
+                decayTimer?.invalidate()
                 WKInterfaceDevice.current().play(.stop)
                 onStop()
             }
@@ -74,9 +86,26 @@ struct ActiveRoundView: View {
         .onAppear {
             elapsed = round.durationSec
             crownValue = 0
+            displayProgress = 0
             didTriggerStop = false
         }
+        .onDisappear {
+            decayTimer?.invalidate()
+        }
         .navigationBarBackButtonHidden(true)
+    }
+
+    /// After 1 second of no crown input, decay progress back to zero.
+    private func scheduleDecay() {
+        decayTimer?.invalidate()
+        decayTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { _ in
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.4)) {
+                    crownValue = 0
+                    displayProgress = 0
+                }
+            }
+        }
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -97,7 +126,7 @@ private struct CrownStopIndicator: View {
                     .fill(Color.white.opacity(0.15))
                 Capsule()
                     .fill(Color.white.opacity(0.6))
-                    .frame(width: geo.size.width * min(progress / 0.8, 1.0))
+                    .frame(width: geo.size.width * min(max(progress, 0), 1.0))
                     .animation(.easeOut(duration: 0.15), value: progress)
             }
         }

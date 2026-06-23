@@ -497,14 +497,14 @@ extension CategoryDashboardView {
         )
     }
 
-    /// Recovery Activities: Sauna, Cold Exposure, Mindfulness
+    /// Recovery Activities: Wellness, Cold Exposure, Mindfulness
     static func recoveryActivities() -> CategoryDashboardView {
         CategoryDashboardView(
             title: "Recovery",
             icon: "leaf.fill",
             color: .green,
             metrics: [
-                MetricDefinition(id: DataType.saunaTotalDuration, title: "Sauna",
+                MetricDefinition(id: DataType.saunaTotalDuration, title: "Wellness",
                                  unit: "min", color: .orange, aggregation: .max,
                                  direction: .higherIsBetter, weight: 0.35),
                 MetricDefinition(id: DataType.coldExposureDuration, title: "Cold Exposure",

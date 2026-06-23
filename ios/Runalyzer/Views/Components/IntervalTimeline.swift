@@ -147,7 +147,8 @@ struct IntervalTimeline: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { drag in
-                                    let x = drag.location.x - geo[proxy.plotAreaFrame].origin.x
+                                    guard let frame = proxy.plotFrame else { return }
+                                    let x = drag.location.x - geo[frame].origin.x
                                     if let d: Date = proxy.value(atX: x) {
                                         scrubDate = d
                                     }

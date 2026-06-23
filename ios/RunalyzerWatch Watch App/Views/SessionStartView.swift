@@ -1,15 +1,14 @@
 import SwiftUI
 
-/// Root view: start a new sauna session or see recent sessions.
+/// Root view: start a new wellness session or see recent sessions.
 struct SessionStartView: View {
     @EnvironmentObject var sessionStore: WatchSessionStore
     @EnvironmentObject var workoutManager: WorkoutManager
     @EnvironmentObject var syncManager: WatchSyncManager
 
-    @State private var activeSession: SaunaSession?
+    @State private var activeSession: WellnessSession?
     @State private var navigationPath = NavigationPath()
     @State private var lastRoundEndDate: Date?
-
     enum Destination: Hashable {
         case pickRound
         case activeRound
@@ -37,7 +36,7 @@ struct SessionStartView: View {
                     Button {
                         startSession()
                     } label: {
-                        Label("Start Sauna", systemImage: "flame.fill")
+                        Label("Start Wellness", systemImage: "flame.fill")
                             .font(.headline)
                     }
                     .buttonStyle(.borderedProminent)
@@ -73,7 +72,7 @@ struct SessionStartView: View {
                 }
                 .padding(.horizontal, 4)
             }
-            .navigationTitle("Sauna")
+            .navigationTitle("Wellness")
             .navigationDestination(for: Destination.self) { dest in
                 switch dest {
                 case .pickRound:
@@ -107,27 +106,27 @@ struct SessionStartView: View {
     // MARK: - Session Lifecycle
 
     private func startSession() {
-        activeSession = SaunaSession()
+        activeSession = WellnessSession()
         lastRoundEndDate = nil
         workoutManager.start()
         navigationPath.append(Destination.pickRound)
     }
 
-    private func startRound(type: SaunaRoundType) {
+    private func startRound(type: WellnessRoundType) {
         activeSession?.startRound(type: type)
         lastRoundEndDate = nil
         workoutManager.enableWaterLock()
-        // Replace picker with active round (don't stack)
-        navigationPath.removeLast()
-        navigationPath.append(Destination.activeRound)
+        var path = NavigationPath()
+        path.append(Destination.activeRound)
+        navigationPath = path
     }
 
     private func stopRound() {
         activeSession?.stopCurrentRound()
         lastRoundEndDate = Date()
-        // Replace active round with picker
-        navigationPath.removeLast()
-        navigationPath.append(Destination.pickRound)
+        var path = NavigationPath()
+        path.append(Destination.pickRound)
+        navigationPath = path
     }
 
     private func endSession() {
@@ -135,16 +134,15 @@ struct SessionStartView: View {
         session.stopCurrentRound()
         activeSession = session
         lastRoundEndDate = nil
-        // Clear navigation and go to summary
-        navigationPath = NavigationPath()
-        navigationPath.append(Destination.summary)
-    }
-
-    private func finishSession() {
-        guard let session = activeSession else { return }
         sessionStore.save(session)
         syncManager.syncSession(session)
         workoutManager.stop()
+        var path = NavigationPath()
+        path.append(Destination.summary)
+        navigationPath = path
+    }
+
+    private func finishSession() {
         activeSession = nil
         lastRoundEndDate = nil
         navigationPath = NavigationPath()

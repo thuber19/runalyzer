@@ -52,7 +52,7 @@ struct SleepTrendView: View {
         .navigationTitle("Sleep")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { loadNights() }
-        .onChange(of: timeRange) { _ in loadNights() }
+        .onChange(of: timeRange) { _, _ in loadNights() }
     }
 
     // MARK: - Data Loading

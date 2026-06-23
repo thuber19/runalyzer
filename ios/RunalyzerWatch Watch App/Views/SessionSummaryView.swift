@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Post-session summary showing all rounds, rest periods, and totals.
 struct SessionSummaryView: View {
-    let session: SaunaSession
+    let session: WellnessSession
     let onDone: () -> Void
 
     var body: some View {

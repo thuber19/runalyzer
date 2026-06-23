@@ -2,25 +2,25 @@ import Foundation
 import Combine
 import os
 
-/// Receives sauna session payloads from the watchOS companion app
+/// Receives wellness session payloads from the watchOS companion app
 /// and saves them as SensorMeasurements.
 ///
 /// Provider pattern: trigger (WCSession receive) → data (decode JSON) → save (MeasurementStore).
-class SaunaSyncProvider: ObservableObject {
+class WellnessSyncProvider: ObservableObject {
     private weak var measurementStore: MeasurementStore?
 
     init(measurementStore: MeasurementStore) {
         self.measurementStore = measurementStore
     }
 
-    /// Called by WatchConnectivityManager when a sauna_session payload arrives.
+    /// Called by WatchConnectivityManager when a wellness_session payload arrives.
     func handleWatchPayload(_ payload: [String: Any]) {
         guard let sessionDict = payload["session"] as? [String: Any],
               let idString = sessionDict["id"] as? String,
               let sessionID = UUID(uuidString: idString),
               let dateInterval = sessionDict["date"] as? TimeInterval,
               let roundsArray = sessionDict["rounds"] as? [[String: Any]] else {
-            AppLogger.watch.error("Invalid sauna session payload")
+            AppLogger.watch.error("Invalid wellness session payload")
             return
         }
 
@@ -63,7 +63,7 @@ class SaunaSyncProvider: ObservableObject {
 
         // Cold exposure: sum duration of cold_plunge rounds
         let coldSec = dataPoints
-            .filter { $0.type == DataType.saunaRound && $0.unit == SaunaRoundType.coldPlunge.rawValue }
+            .filter { $0.type == DataType.saunaRound && $0.unit == WellnessRoundType.coldPlunge.rawValue }
             .reduce(0) { $0 + $1.value }
         if coldSec > 0 {
             dataPoints.append(DataPoint(
@@ -76,13 +76,13 @@ class SaunaSyncProvider: ObservableObject {
         let measurement = SensorMeasurement(
             id: sessionID,
             date: sessionDate,
-            type: .saunaSession,
+            type: .wellnessSession,
             sources: [.watchApp],
             dataPoints: dataPoints,
             rawDataFiles: []
         )
 
         measurementStore?.save(measurement)
-        AppLogger.watch.info("Saved sauna session \(sessionID) with \(roundsArray.count) rounds")
+        AppLogger.watch.info("Saved wellness session \(sessionID) with \(roundsArray.count) rounds")
     }
 }

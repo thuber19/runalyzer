@@ -141,7 +141,8 @@ struct ScrubbingLineChart: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { drag in
-                                    let x = drag.location.x - geo[proxy.plotAreaFrame].origin.x
+                                    guard let frame = proxy.plotFrame else { return }
+                                    let x = drag.location.x - geo[frame].origin.x
                                     guard let date: Date = proxy.value(atX: x) else { return }
                                     scrubPoint = data.min(by: {
                                         abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date))

@@ -2,10 +2,10 @@ import Foundation
 import Combine
 import os
 
-/// Persists sauna sessions as JSON on the watch's local file system.
+/// Persists wellness sessions as JSON on the watch's local file system.
 /// Sessions are stored until synced to the iOS app, then cleaned up.
 class WatchSessionStore: ObservableObject {
-    @Published var sessions: [SaunaSession] = []
+    @Published var sessions: [WellnessSession] = []
 
     private static let maxStoredSessions = 30
     private static let logger = Logger(subsystem: "com.runalyzer.watch", category: "SessionStore")
@@ -21,7 +21,7 @@ class WatchSessionStore: ObservableObject {
 
     // MARK: - CRUD
 
-    func save(_ session: SaunaSession) {
+    func save(_ session: WellnessSession) {
         if let index = sessions.firstIndex(where: { $0.id == session.id }) {
             sessions[index] = session
         } else {
@@ -37,7 +37,7 @@ class WatchSessionStore: ObservableObject {
         cleanup()
     }
 
-    func unsyncedSessions() -> [SaunaSession] {
+    func unsyncedSessions() -> [WellnessSession] {
         sessions.filter { !$0.synced && !$0.isActive }
     }
 
@@ -47,7 +47,7 @@ class WatchSessionStore: ObservableObject {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
         do {
             let data = try Data(contentsOf: fileURL)
-            sessions = try JSONDecoder().decode([SaunaSession].self, from: data)
+            sessions = try JSONDecoder().decode([WellnessSession].self, from: data)
         } catch {
             Self.logger.error("Failed to load sessions: \(error.localizedDescription)")
         }

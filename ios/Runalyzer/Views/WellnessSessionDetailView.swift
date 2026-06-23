@@ -3,9 +3,9 @@ import Charts
 import HealthKit
 
 /// A parsed round from DataPoints for display.
-private struct SaunaRoundInfo: Identifiable {
+private struct WellnessRoundInfo: Identifiable {
     let id: Int
-    let type: SaunaRoundType
+    let type: WellnessRoundType
     let start: Date
     let end: Date
     let duration: TimeInterval
@@ -18,7 +18,7 @@ private struct HRSample: Identifiable {
     var date: Date { id }
 }
 
-/// Detail view for a sauna session showing round timeline and heart rate chart.
+/// Detail view for a wellness session showing round timeline and heart rate chart.
 struct SaunaSessionDetailView: View {
     let measurement: SensorMeasurement
     @EnvironmentObject var healthKit: HealthKitManager
@@ -27,17 +27,17 @@ struct SaunaSessionDetailView: View {
     @State private var isLoadingHR = true
     @State private var scrubSample: HRSample?
 
-    private var rounds: [SaunaRoundInfo] {
+    private var rounds: [WellnessRoundInfo] {
         measurement.dataPoints
             .filter { $0.type == DataType.saunaRound }
-            .compactMap { dp -> (SaunaRoundType, Date, Date, TimeInterval)? in
-                guard let roundType = SaunaRoundType(rawValue: dp.unit),
+            .compactMap { dp -> (WellnessRoundType, Date, Date, TimeInterval)? in
+                guard let roundType = WellnessRoundType(rawValue: dp.unit),
                       let end = dp.endTimestamp else { return nil }
                 return (roundType, dp.timestamp, end, dp.value)
             }
             .sorted { $0.1 < $1.1 }
             .enumerated()
-            .map { SaunaRoundInfo(id: $0.offset, type: $0.element.0, start: $0.element.1, end: $0.element.2, duration: $0.element.3) }
+            .map { WellnessRoundInfo(id: $0.offset, type: $0.element.0, start: $0.element.1, end: $0.element.2, duration: $0.element.3) }
     }
 
     private var sessionStart: Date? { rounds.first?.start }
@@ -54,7 +54,7 @@ struct SaunaSessionDetailView: View {
             }
             .padding()
         }
-        .navigationTitle("Sauna Session")
+        .navigationTitle("Wellness Session")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { loadHeartRate() }
     }
@@ -197,7 +197,7 @@ struct SaunaSessionDetailView: View {
         }
     }
 
-    private func roundAt(date: Date) -> SaunaRoundInfo? {
+    private func roundAt(date: Date) -> WellnessRoundInfo? {
         rounds.first { $0.start <= date && date <= $0.end }
     }
 
@@ -213,7 +213,7 @@ struct SaunaSessionDetailView: View {
         }
     }
 
-    private func roundRow(_ round: SaunaRoundInfo) -> some View {
+    private func roundRow(_ round: WellnessRoundInfo) -> some View {
         let avgHR = hrForRound(start: round.start, end: round.end)
         return HStack {
             Image(systemName: round.type.icon)
@@ -258,7 +258,7 @@ struct SaunaSessionDetailView: View {
 
     // MARK: - Helpers
 
-    private var uniqueRoundTypes: [SaunaRoundType] {
+    private var uniqueRoundTypes: [WellnessRoundType] {
         var seen = Set<String>()
         return rounds.compactMap { round in
             guard seen.insert(round.type.rawValue).inserted else { return nil }

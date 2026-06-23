@@ -1,9 +1,9 @@
 import Foundation
 
-/// A single round within a sauna session (e.g. one 10-minute Finnish sauna stint).
-struct SaunaRound: Codable, Identifiable {
+/// A single round within a wellness session (e.g. one 10-minute Finnish sauna stint).
+struct WellnessRound: Codable, Identifiable {
     let id: UUID
-    let type: SaunaRoundType
+    let type: WellnessRoundType
     let startDate: Date
     var endDate: Date?
 
@@ -14,7 +14,7 @@ struct SaunaRound: Codable, Identifiable {
         return end.timeIntervalSince(startDate)
     }
 
-    init(type: SaunaRoundType) {
+    init(type: WellnessRoundType) {
         self.id = UUID()
         self.type = type
         self.startDate = Date()

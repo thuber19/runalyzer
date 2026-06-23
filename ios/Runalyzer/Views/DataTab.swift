@@ -13,7 +13,7 @@ private enum DataFilter: String, CaseIterable {
     case labs       = "Labs"
     case fluid      = "Fluid"
     case checkIns   = "Check-ins"
-    case sauna      = "Sauna"
+    case wellness   = "Wellness"
 }
 
 struct DataTab: View {
@@ -34,7 +34,7 @@ struct DataTab: View {
         case labResults(SensorMeasurement)
         case fluidIntake(SensorMeasurement)
         case checkIn(SensorMeasurement)
-        case saunaSession(SensorMeasurement)
+        case wellnessSession(SensorMeasurement)
 
         var id: String {
             switch self {
@@ -46,7 +46,7 @@ struct DataTab: View {
             case .labResults(let m): return "lr-\(m.id.uuidString)"
             case .fluidIntake(let m): return "fl-\(m.id.uuidString)"
             case .checkIn(let m): return "ci-\(m.id.uuidString)"
-            case .saunaSession(let m): return "sa-\(m.id.uuidString)"
+            case .wellnessSession(let m): return "sa-\(m.id.uuidString)"
             }
         }
 
@@ -59,7 +59,7 @@ struct DataTab: View {
             case .labResults(let m): return m.date
             case .fluidIntake(let m): return m.date
             case .checkIn(let m): return m.date
-            case .saunaSession(let m): return m.date
+            case .wellnessSession(let m): return m.date
             }
         }
     }
@@ -120,10 +120,10 @@ struct DataTab: View {
             }
         }
 
-        if filter == .all || filter == .sauna {
-            for m in measurementStore.measurements(ofType: .saunaSession) {
+        if filter == .all || filter == .wellness {
+            for m in measurementStore.measurements(ofType: .wellnessSession) {
                 let day = cal.startOfDay(for: m.date)
-                rowsByDay[day, default: []].append(.saunaSession(m))
+                rowsByDay[day, default: []].append(.wellnessSession(m))
             }
         }
 
@@ -222,7 +222,7 @@ struct DataTab: View {
         case .workout(let w):
             workoutStore.delete(w.id)
         case .bodyComp(let m), .derived(let m), .labResults(let m),
-             .fluidIntake(let m), .checkIn(let m), .saunaSession(let m):
+             .fluidIntake(let m), .checkIn(let m), .wellnessSession(let m):
             measurementStore.delete(m.id)
         case .metric(_, _, _, _):
             break  // Metric rows are aggregates — delete via Delete All
@@ -265,8 +265,8 @@ struct DataTab: View {
         case .checkIns:
             let ids = Set(measurementStore.measurements(ofType: .checkIn).map(\.id))
             if !ids.isEmpty { measurementStore.deleteBatch(ids) }
-        case .sauna:
-            let ids = Set(measurementStore.measurements(ofType: .saunaSession).map(\.id))
+        case .wellness:
+            let ids = Set(measurementStore.measurements(ofType: .wellnessSession).map(\.id))
             if !ids.isEmpty { measurementStore.deleteBatch(ids) }
         }
     }
@@ -373,14 +373,14 @@ struct DataTab: View {
                     .font(.caption2).foregroundColor(.gray)
             }
 
-        case .saunaSession(let m):
+        case .wellnessSession(let m):
             NavigationLink(destination: SaunaSessionDetailView(measurement: m)) {
                 HStack(spacing: 12) {
                     Image(systemName: "flame.fill")
                         .foregroundColor(.orange)
                         .frame(width: 24)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Sauna").font(.subheadline)
+                        Text("Wellness").font(.subheadline)
                         Text(m.summary).font(.caption).foregroundColor(.gray)
                     }
                     Spacer()
@@ -607,7 +607,7 @@ fileprivate extension DataTab.DataRow {
         case .labResults:  return 4
         case .fluidIntake:    return 5
         case .checkIn:        return 6
-        case .saunaSession:   return 7
+        case .wellnessSession:   return 7
         }
     }
 }

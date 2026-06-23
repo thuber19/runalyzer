@@ -3,14 +3,14 @@ import Combine
 import WatchConnectivity
 import os
 
-/// iOS-side WatchConnectivity delegate. Receives sauna sessions
+/// iOS-side WatchConnectivity delegate. Receives wellness sessions
 /// from the watchOS companion app via `transferUserInfo`.
 class WatchConnectivityManager: NSObject, ObservableObject {
     private let logger = AppLogger.watch
-    private var saunaSyncProvider: SaunaSyncProvider?
+    private var wellnessSyncProvider: WellnessSyncProvider?
 
-    func configure(saunaSyncProvider: SaunaSyncProvider) {
-        self.saunaSyncProvider = saunaSyncProvider
+    func configure(wellnessSyncProvider: WellnessSyncProvider) {
+        self.wellnessSyncProvider = wellnessSyncProvider
     }
 
     func activate() {
@@ -52,9 +52,9 @@ extension WatchConnectivityManager: WCSessionDelegate {
         }
 
         switch type {
-        case "sauna_session":
-            logger.info("Received sauna session from watch")
-            saunaSyncProvider?.handleWatchPayload(userInfo)
+        case "wellness_session":
+            logger.info("Received wellness session from watch")
+            wellnessSyncProvider?.handleWatchPayload(userInfo)
         default:
             logger.warning("Unknown watch payload type: \(type)")
         }

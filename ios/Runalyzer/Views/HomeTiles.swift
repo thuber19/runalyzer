@@ -346,10 +346,10 @@ extension HomeTab {
 
         let weekAgo = cal.date(byAdding: .day, value: -7, to: Date()) ?? Date()
 
-        // Weekly sauna minutes (stored in seconds)
-        let saunaPoints = metricIndex.query(type: DataType.saunaTotalDuration,
+        // Weekly wellness minutes (stored in seconds)
+        let wellnessPoints = metricIndex.query(type: DataType.saunaTotalDuration,
                                              from: weekAgo, to: Date())
-        let saunaMin = Int(saunaPoints.reduce(0) { $0 + $1.value } / 60)
+        let wellnessMin = Int(wellnessPoints.reduce(0) { $0 + $1.value } / 60)
 
         // Weekly mindfulness minutes
         let mindfulPoints = metricIndex.query(type: DataType.mindfulnessDuration,
@@ -376,10 +376,10 @@ extension HomeTab {
                 }
                 .foregroundColor(trendColor)
 
-                if saunaMin > 0 || mindfulMin > 0 {
+                if wellnessMin > 0 || mindfulMin > 0 {
                     HStack(spacing: 8) {
-                        if saunaMin > 0 {
-                            Label("\(saunaMin)m", systemImage: "flame.fill")
+                        if wellnessMin > 0 {
+                            Label("\(wellnessMin)m", systemImage: "flame.fill")
                                 .font(.caption2).foregroundColor(.orange)
                         }
                         if mindfulMin > 0 {

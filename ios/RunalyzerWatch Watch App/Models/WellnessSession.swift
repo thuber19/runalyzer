@@ -1,10 +1,10 @@
 import Foundation
 
-/// A complete sauna visit consisting of multiple rounds.
-struct SaunaSession: Codable, Identifiable {
+/// A complete wellness session consisting of multiple rounds.
+struct WellnessSession: Codable, Identifiable {
     let id: UUID
     let date: Date
-    var rounds: [SaunaRound]
+    var rounds: [WellnessRound]
     var synced: Bool
 
     var totalRoundDurationSec: TimeInterval {
@@ -32,7 +32,7 @@ struct SaunaSession: Codable, Identifiable {
         totalRoundDurationSec + totalRestDurationSec
     }
 
-    var activeRound: SaunaRound? {
+    var activeRound: WellnessRound? {
         rounds.last(where: { $0.isActive })
     }
 
@@ -47,8 +47,8 @@ struct SaunaSession: Codable, Identifiable {
         self.synced = false
     }
 
-    mutating func startRound(type: SaunaRoundType) {
-        rounds.append(SaunaRound(type: type))
+    mutating func startRound(type: WellnessRoundType) {
+        rounds.append(WellnessRound(type: type))
     }
 
     mutating func stopCurrentRound() {

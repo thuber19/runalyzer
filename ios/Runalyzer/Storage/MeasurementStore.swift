@@ -55,7 +55,7 @@ class MeasurementStore: ObservableObject {
             let lightweightTypes: Set<String> = [
                 MeasurementType.fluidIntake.rawValue,
                 MeasurementType.checkIn.rawValue,
-                MeasurementType.saunaSession.rawValue
+                MeasurementType.wellnessSession.rawValue
             ]
             let lightweightIDs = records.filter { lightweightTypes.contains($0.type) }.map(\.id)
             if !lightweightIDs.isEmpty {
