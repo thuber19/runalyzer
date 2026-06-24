@@ -18,41 +18,33 @@ struct HomeTab: View {
     @State private var navigateToHabits = false
     @State private var navigateToHydration = false
 
+    // Cached hero values — recomputed only when store data changes, not on every body eval
+    @State private var cachedRecovery: Double? = nil
+    @State private var cachedSleep: Double? = nil
+    @State private var cachedHeadline: String = ""
+    @State private var cachedInsights: [HomeInsight] = []
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 0) {
-                    // Zone 1: Aura Hero
-                    let today = cal.startOfDay(for: Date())
-                    let recovery = latestRecoveryScore(on: today)
-                    let weekAgo = cal.date(byAdding: .day, value: -7, to: today)!
-                    let sleepPoints = metricIndex.query(type: DataType.sleepScore,
-                                                        measurementType: .derived,
-                                                        from: weekAgo, to: Date())
-                    let sleep = sleepPoints.last.map { $0.value }
-
-                    let heartDef = CategoryDashboardView.heart()
-                    let heartTrend = CategoryDashboardView.computeTrend(
-                        metrics: heartDef.metrics, days: 30,
-                        metricIndex: metricIndex, sourcePrefs: sourcePrefs)
-
-                    let vibeScore = computeVibeScore(recovery: recovery, sleep: sleep)
-                    let headline = generateHeadline(recovery: recovery, sleep: sleep,
-                                                     heartTrend: heartTrend.direction)
+                    // Zone 1: Aura Hero (uses cached values)
+                    let vibeScore = computeVibeScore(recovery: cachedRecovery, sleep: cachedSleep)
 
                     NavigationLink {
                         RecoveryDashboardView()
                     } label: {
                         AuraHeroView(
                             vibeScore: vibeScore,
-                            headline: headline,
-                            recoveryScore: recovery,
-                            sleepScore: sleep
+                            headline: cachedHeadline,
+                            recoveryScore: cachedRecovery,
+                            sleepScore: cachedSleep
                         )
                     }
                     .buttonStyle(.plain)
 
                     // Zone 2: Action Strip
+                    let today = cal.startOfDay(for: Date())
                     let scheduled = habitStore.habits.filter { $0.isScheduled(on: today) }
                     let storedGoal = UserDefaults.standard.integer(forKey: "hydration_goal_ml")
                     let hydrationGoal = Double(storedGoal > 0 ? storedGoal : 2500)
@@ -78,10 +70,8 @@ struct HomeTab: View {
                             .padding(.top, 16)
                     }
 
-                    // Zone 3: Editorial Feed
-                    let insights = buildInsights()
-
-                    EditorialFeedView(insights: insights)
+                    // Zone 3: Editorial Feed (uses cached insights)
+                    EditorialFeedView(insights: cachedInsights)
                         .padding(.horizontal, 16)
                         .padding(.top, 16)
                         .padding(.bottom, 20)
@@ -109,6 +99,29 @@ struct HomeTab: View {
                 FluidDashboardView()
             }
         }
+        .onAppear { refreshHomeData() }
+        .onChange(of: measurementStore.measurements.count) { refreshHomeData() }
+        .onChange(of: workoutStore.workouts.count) { refreshHomeData() }
+    }
+
+    private func refreshHomeData() {
+        let today = cal.startOfDay(for: Date())
+        let recovery = latestRecoveryScore(on: today)
+        let weekAgo = cal.date(byAdding: .day, value: -7, to: today)!
+        let sleepPoints = metricIndex.query(type: DataType.sleepScore,
+                                            measurementType: .derived,
+                                            from: weekAgo, to: Date())
+        let sleep = sleepPoints.last.map { $0.value }
+        let heartDef = CategoryDashboardView.heart()
+        let heartTrend = CategoryDashboardView.computeTrend(
+            metrics: heartDef.metrics, days: 30,
+            metricIndex: metricIndex, sourcePrefs: sourcePrefs)
+
+        cachedRecovery = recovery
+        cachedSleep = sleep
+        cachedHeadline = generateHeadline(recovery: recovery, sleep: sleep,
+                                           heartTrend: heartTrend.direction)
+        cachedInsights = buildInsights()
     }
 
     // MARK: - Helpers (used by HomeTiles extension)
