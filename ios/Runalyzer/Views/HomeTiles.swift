@@ -135,6 +135,40 @@ extension HomeTab {
             destination: AnyView(SleepDashboardView())
         ))
 
+        // Habits
+        let scheduled = habitStore.habits.filter { $0.isScheduled(on: today) }
+        let completedCount = scheduled.filter { habit in
+            habitStore.todayLogs.contains { $0.habitId == habit.id && $0.isCompleted }
+        }.count
+        let habitsTotal = scheduled.count
+
+        let habitsPriority: InsightPriority = {
+            if habitsTotal == 0 { return .neutral }
+            if completedCount == habitsTotal { return .positive }
+            if completedCount == 0 { return .attention }
+            return .neutral
+        }()
+
+        let habitsHeadline: String = {
+            if habitsTotal == 0 { return "No habits scheduled" }
+            if completedCount == habitsTotal { return "All done" }
+            return "\(completedCount)/\(habitsTotal) completed"
+        }()
+
+        insights.append(HomeInsight(
+            id: "habits",
+            priority: habitsPriority,
+            icon: "checkmark.circle",
+            iconColor: completedCount == habitsTotal && habitsTotal > 0 ? .green :
+                       (completedCount == 0 && habitsTotal > 0 ? .orange : .gray),
+            title: "Habits",
+            headline: habitsHeadline,
+            detail: nil,
+            sparklineValues: nil,
+            sparklineColor: nil,
+            destination: AnyView(HabitsView())
+        ))
+
         // Heart trend
         let heartDef = CategoryDashboardView.heart()
         let heartTrend = CategoryDashboardView.computeTrend(
@@ -284,7 +318,7 @@ extension HomeTab {
             detail: nil,
             sparklineValues: nil,
             sparklineColor: nil,
-            destination: AnyView(CategoryDashboardView.recoveryActivities())
+            destination: AnyView(WellnessDashboardView())
         ))
 
         return insights.sorted { $0.priority < $1.priority }

@@ -104,7 +104,7 @@ struct WorkoutAnalyticsView: View {
 
         return HStack(spacing: 0) {
             statCol("\(filteredWorkouts.count)", "Workouts")
-            statCol(String(format: "%.0f", totalMin), "Total min")
+            statCol(formatDuration(totalMin * 60), "Duration")
             if totalDist > 0 { statCol(String(format: "%.1f", totalDist), "km") }
             if meanHR > 0 { statCol(String(format: "%.0f", meanHR), "Avg HR") }
         }
